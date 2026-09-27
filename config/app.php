@@ -78,11 +78,18 @@ return [
     |
     */
 
-    'locale' => env('APP_LOCALE', 'en'),
+    /*
+    | Сайт русскоязычный, поэтому локаль по умолчанию — ru.
+    | Это важно для атрибута lang в <html>: он задаёт язык озвучивания
+    | для скринридеров и правила переноса строк в браузере.
+    | Значение можно переопределить через APP_LOCALE в .env.
+    */
 
-    'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
+    'locale' => env('APP_LOCALE', 'ru'),
 
-    'faker_locale' => env('APP_FAKER_LOCALE', 'en_US'),
+    'fallback_locale' => env('APP_FALLBACK_LOCALE', 'ru'),
+
+    'faker_locale' => env('APP_FAKER_LOCALE', 'ru_RU'),
 
     /*
     |--------------------------------------------------------------------------

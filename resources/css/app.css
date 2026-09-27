@@ -1,11 +1,133 @@
 @import 'tailwindcss';
 
-@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
-@source '../../storage/framework/views/*.php';
-@source '../**/*.blade.php';
-@source '../**/*.js';
+/* Self-hosted шрифты (npm/@fontsource, без внешних CDN).
+   Manrope Variable — единственный @font-face-блок покрывает кириллицу
+   через unicode-range U+0400-045F, браузер тянет только нужный сабсет.
+   Caveat подключаем только одним начертанием (400). Кириллический сабсет
+   содержит полный русский алфавит, латинский добавляет цифры и пунктуацию,
+   чтобы в рукописном акценте не появлялся подменённый глиф Manrope. */
+@import '@fontsource-variable/manrope/wght.css';
+@import '@fontsource/caveat/cyrillic-400.css';
+@import '@fontsource/caveat/latin-400.css';
 
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+    /* ---------- Поверхности ---------- */
+    --color-canvas: #f5f1e8;
+    --color-surface: #faf8f2;
+
+    /* ---------- Бренд ---------- */
+    --color-primary: #52634a;
+    --color-primary-dark: #354438;
+    --color-accent: #8a6548;
+
+    /* Осветлённый вариант акцента: на тёмно-зелёном фоне #8a6548 не читается.
+       Контраст #d2b694 к #354438 — 5.3:1 (AA). */
+    --color-accent-light: #d2b694;
+
+    /* ---------- Текст ---------- */
+    --color-ink: #292d29;
+    --color-ink-muted: #6e6a60;
+    --color-ink-inverse: #faf8f2;
+
+    /* ---------- Тонкие линии ---------- */
+    --color-line: #ded7c8;
+    --color-line-strong: #c8bfae;
+
+    /* ---------- Шрифты ---------- */
+    --font-sans: 'Manrope Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-hand: 'Caveat', 'Segoe Script', cursive;
+
+    /* ---------- Типографическая шкала ----------
+       Плавная адаптивная шкала: пять размеров на весь сайт. */
+    --text-display: clamp(2.125rem, 1.55rem + 2.6vw, 3.5rem);
+    --text-display--line-height: 1.08;
+    --text-display--letter-spacing: -0.02em;
+
+    --text-h2: clamp(1.75rem, 1.4rem + 1.6vw, 2.5rem);
+    --text-h2--line-height: 1.16;
+    --text-h2--letter-spacing: -0.015em;
+
+    --text-h3: clamp(1.25rem, 1.12rem + 0.6vw, 1.5rem);
+    --text-h3--line-height: 1.32;
+
+    --text-lead: clamp(1.0625rem, 1rem + 0.35vw, 1.1875rem);
+    --text-lead--line-height: 1.65;
+
+    --text-body: 1rem;
+    --text-body--line-height: 1.7;
+
+    --text-small: 0.875rem;
+    --text-small--line-height: 1.6;
+
+    --text-eyebrow: clamp(1.25rem, 1.15rem + 0.45vw, 1.5rem);
+    --text-eyebrow--line-height: 1.2;
+
+    /* ---------- Скругления (умеренные) ---------- */
+    --radius-control: 0.5rem;
+    --radius-card: 0.875rem;
+    --radius-media: 1.125rem;
+
+    /* ---------- Тени (минимум, только для отделения) ---------- */
+    --shadow-soft: 0 1px 2px rgb(41 45 41 / 0.04), 0 10px 30px -18px rgb(41 45 41 / 0.18);
+
+    /* ---------- Контейнер ---------- */
+    --container-site: 76rem;
+
+    /* ---------- Движение ---------- */
+    --ease-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@layer base {
+    html {
+        -webkit-text-size-adjust: 100%;
+        scroll-behavior: smooth;
+    }
+
+    body {
+        @apply bg-canvas font-sans text-ink antialiased;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4 {
+        @apply text-balance font-semibold;
+    }
+
+    p {
+        @apply text-pretty;
+    }
+
+    :focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 3px;
+    }
+
+    /* Уважаем системную настройку уменьшения движения. */
+    @media (prefers-reduced-motion: reduce) {
+        html {
+            scroll-behavior: auto;
+        }
+
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
+        }
+    }
+}
+
+@layer components {
+    /* Ссылка, видимая только при получении фокуса с клавиатуры. */
+    .skip-link {
+        @apply absolute top-4 left-4 z-100 -translate-y-24 rounded-control bg-primary px-5 py-3
+            text-sm font-medium text-ink-inverse transition-transform duration-200 ease-soft;
+    }
+
+    .skip-link:focus-visible {
+        @apply translate-y-0;
+    }
 }
