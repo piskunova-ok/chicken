@@ -25,6 +25,12 @@ final class Button extends Component
         public readonly bool $disabled = false,
         /** Внешняя ссылка: добавляет rel="noopener noreferrer". */
         public readonly bool $external = false,
+        /**
+         * light | dark — для тёмных секций. На тёмно-зелёном фоне светлые
+         * варианты и, что важнее, неактивное состояние были бы нечитаемы,
+         * поэтому у dark отдельные цвета во всех состояниях.
+         */
+        public readonly string $tone = 'light',
     ) {}
 
     public function render(): View

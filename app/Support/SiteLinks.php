@@ -33,6 +33,15 @@ final class SiteLinks
     }
 
     /**
+     * @param  array{label: string, route?: string|null, url?: string|null}  $item
+     * @return array{label: string, url: string|null}
+     */
+    public static function resolveOne(array $item): array
+    {
+        return self::resolve([$item])[0];
+    }
+
+    /**
      * @param  array<int, array{label: string, url?: string|null}>  $items
      * @return array<int, array{label: string, url: string|null}>
      */
