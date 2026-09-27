@@ -102,7 +102,7 @@
 
             <div class="lg:col-span-7">
                 <x-media
-                    src="images/01_hero_roast_chicken.jpg"
+                    src="{{ asset('images/01_hero_roast_chicken.jpg') }}"
                     alt="Жареная курица на столе"
                     variant="hero"
                     ratio="1/1"
@@ -130,7 +130,7 @@
         <div class="grid gap-10 lg:grid-cols-2 lg:items-center lg:gap-16">
             <x-media
                 class="order-2 lg:order-1"
-                src="images/05_cooking_lifestyle.jpg"
+                src="{{ asset('images/05_cooking_lifestyle.jpg') }}"
                 alt="Приготовление блюда из продуктов"
                 variant="lifestyle"
                 ratio="4/3"
@@ -182,7 +182,7 @@
             @foreach ($products as $product)
                 <article class="relative flex h-full flex-col overflow-hidden rounded-card border border-line bg-canvas shadow-soft hover:border-primary/40">
                     <x-media
-                        :src="$product['image']"
+                        :src="asset($product['image'])"
                         :alt="$product['image_alt']"
                         variant="card"
                         ratio="16/9"
@@ -264,7 +264,7 @@
 
             <div class="lg:col-span-7">
                 <x-media
-                    src="images/04_family_lifestyle.jpg"
+                    src="{{ asset('images/04_family_lifestyle.jpg') }}"
                     alt="Семейная трапеза"
                     variant="lifestyle"
                     ratio="16/9"

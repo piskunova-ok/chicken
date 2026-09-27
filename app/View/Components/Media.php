@@ -26,6 +26,12 @@ final class Media extends Component
      * @param  string  $ratio  Пропорции: 4/3, 3/2, 1/1, 16/9, 4/5, 5/4.
      * @param  string  $variant  Стиль заглушки: hero | card | lifestyle.
      * @param  bool  $priority  True для изображения первого экрана (без lazy).
+     * @param  bool  $quiet  Заглушка без подписи: нужна там, где блок
+     *                       повторяется много раз (например, сетка карточек
+     *                       каталога) и текст «Место для фотографии» в каждой
+     *                       ячейке превратился бы в визуальный шум. Такая
+     *                       заглушка декоративна, поэтому помечается
+     *                       aria-hidden и не попадает в дерево доступности.
      */
     public function __construct(
         public readonly ?string $src = null,
@@ -33,6 +39,7 @@ final class Media extends Component
         public readonly string $ratio = '4/3',
         public readonly string $variant = 'card',
         public readonly bool $priority = false,
+        public readonly bool $quiet = false,
     ) {}
 
     /**

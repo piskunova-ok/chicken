@@ -23,7 +23,10 @@
         >
     @else
         {{-- Локальная векторная заглушка: никаких внешних изображений. --}}
-        <div class="absolute inset-0" role="img" aria-label="{{ $placeholderLabel() }}">
+        <div
+            class="absolute inset-0"
+            @if ($quiet) aria-hidden="true" @else role="img" aria-label="{{ $placeholderLabel() }}" @endif
+        >
             <svg
                 class="size-full"
                 viewBox="0 0 400 300"
@@ -48,9 +51,11 @@
                 @endif
             </svg>
 
-            <p class="absolute inset-0 flex items-center justify-center px-6 text-center text-small text-ink-muted/70">
-                {{ $placeholderLabel() }}
-            </p>
+            @unless ($quiet)
+                <p class="absolute inset-0 flex items-center justify-center px-6 text-center text-small text-ink-muted/70">
+                    {{ $placeholderLabel() }}
+                </p>
+            @endunless
         </div>
     @endif
 </div>
