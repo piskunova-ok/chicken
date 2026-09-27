@@ -6,8 +6,10 @@
 
     Правила, которым подчинена страница:
     - один h1 (Hero), дальше h2 на секции и h3 на карточки и пункты;
-    - фотографии пока не загружены: x-media резервирует пропорции и рисует
-      локальный placeholder, реальное фото подключается атрибутами src/alt;
+    - фотографии лежат локально в public/images и отдаются в оптимизированном
+      виде (.jpg). Исходники .png остаются в репозитории нетронутыми. Пропорции
+      бокса подобраны под пропорции исходника, поэтому кадрирование по минимуму,
+      а апскейл не используется;
     - ссылки на ещё не созданные разделы (about, quality, contacts) идут
       через x-route-button и выводятся неактивными, поэтому страница не ведёт
       в 404 ни при каком состоянии проекта;
@@ -48,6 +50,21 @@
     ];
 
     $contactsLead = 'Хотите узнать больше о продукции, ассортименте или условиях сотрудничества? Свяжитесь с нами удобным способом.';
+
+    /*
+     | Карточки продукции. Маршрут разрешается один раз здесь, чтобы в разметке
+     | не дублировать проверку Route::has() и не вести карточку в 404, если
+     | категория когда-нибудь исчезнет из routes/web.php.
+     */
+    $products = array_map(
+        static fn (array $product): array => $product + [
+            'url' => \App\Support\SiteLinks::resolveOne([
+                'label' => $product['name'],
+                'route' => $product['route'],
+            ])['url'],
+        ],
+        (array) config('site.products', []),
+    );
 @endphp
 
 <x-layouts.app
@@ -55,6 +72,14 @@
     :description="config('site.meta.description')"
 >
     {{-- ============================ HERO ============================ --}}
+    {{--
+        Первый экран: на desktop две колонки 5/7, текст слева, фотография
+        справа. На мобильных сетка складывается в одну колонку, текст идёт
+        первым и остаётся выше фотографии.
+
+        Исходник 1145x1374 (портрет 5:6). Бокс 1/1 запрашивает у картинки
+        около 8% высоты, тогда как 3/2 съедал бы почти половину кадра.
+    --}}
     <x-section tone="canvas" spacing="loose">
         <div class="grid gap-10 lg:grid-cols-12 lg:items-center lg:gap-12">
             <div class="lg:col-span-5">
@@ -76,7 +101,13 @@
             </div>
 
             <div class="lg:col-span-7">
-                <x-media variant="hero" ratio="3/2" priority />
+                <x-media
+                    src="images/01_hero_roast_chicken.jpg"
+                    alt="Жареная курица на столе"
+                    variant="hero"
+                    ratio="1/1"
+                    priority
+                />
             </div>
         </div>
     </x-section>
@@ -91,9 +122,19 @@
     </x-section>
 
     {{-- ========================= О КОМПАНИИ ========================= --}}
+    {{--
+        Асимметричная композиция 50/50: фотография слева, текст справа.
+        Исходник 688x380 (1.81:1) в боксе 4/3 умещается почти без потерь.
+    --}}
     <x-section tone="canvas" spacing="default">
         <div class="grid gap-10 lg:grid-cols-2 lg:items-center lg:gap-16">
-            <x-media variant="card" ratio="4/3" class="order-2 lg:order-1" />
+            <x-media
+                class="order-2 lg:order-1"
+                src="images/05_cooking_lifestyle.jpg"
+                alt="Приготовление блюда из продуктов"
+                variant="lifestyle"
+                ratio="4/3"
+            />
 
             <div class="order-1 lg:order-2">
                 <x-section-heading
@@ -118,6 +159,18 @@
     </x-section>
 
     {{-- ========================== ПРОДУКЦИЯ ========================== --}}
+    {{--
+        Две равноправные карточки: 50/50 на desktop, друг под другом на mobile.
+
+        Исходники 768x300 и 764x300 (около 2.55:1). В боксе 4/3 картинку
+        пришлось бы растянуть в 1.37x, поэтому берём 16/9: масштаб около
+        1.03x, вся ширина кадра используется, мышь в кадре не режется.
+
+        Вся карточка кликабельна: у ссылки в заголовке есть псевдоэлемент
+        after:inset-0, который накрывает карточку. Ссылка при этом остаётся
+        внутри h3, поэтому у карточки ровно одно имя для скринридера, а сама
+        кнопка вынесена на z-10 и не перехватывается этим накрытием.
+    --}}
     <x-section tone="surface" id="products" spacing="default">
         <x-section-heading
             eyebrow="Для вашего стола"
@@ -126,16 +179,30 @@
         />
 
         <div class="mt-10 grid gap-6 md:grid-cols-2">
-            @foreach ((array) config('site.products', []) as $product)
-                <article class="flex h-full flex-col overflow-hidden rounded-card border border-line bg-canvas shadow-soft">
-                    <x-media variant="card" ratio="4/3" />
+            @foreach ($products as $product)
+                <article class="relative flex h-full flex-col overflow-hidden rounded-card border border-line bg-canvas shadow-soft hover:border-primary/40">
+                    <x-media
+                        :src="$product['image']"
+                        :alt="$product['image_alt']"
+                        variant="card"
+                        ratio="16/9"
+                    />
 
                     <div class="flex flex-1 flex-col p-6 lg:p-7">
-                        <h3 class="text-h3 text-ink">{{ $product['name'] }}</h3>
+                        <h3 class="text-h3 text-ink">
+                            @if ($product['url'] !== null)
+                                <a
+                                    href="{{ $product['url'] }}"
+                                    class="after:absolute after:inset-0 after:content-['']"
+                                >{{ $product['name'] }}</a>
+                            @else
+                                {{ $product['name'] }}
+                            @endif
+                        </h3>
                         <p class="mt-3 text-body text-ink-muted">{{ $product['description'] }}</p>
 
                         <x-route-button
-                            class="mt-auto self-start pt-6"
+                            class="relative z-10 mt-auto self-start pt-6"
                             :label="$product['cta']"
                             :route="$product['route']"
                         />
@@ -176,9 +243,18 @@
     </x-section>
 
     {{-- ========================== LIFESTYLE ========================== --}}
+    {{--
+        Намеренно не повторяет «О компании». Там симметрия 50/50, фотография
+        слева в пропорциях 4/3 и текст с кнопкой. Здесь зеркальная расстановка
+        (текст слева, фото справа), асимметрия 5/7 и широкое фото 16/9 —
+        блок читается как полоса, а не как вторая копия соседней секции.
+        CTA здесь намеренно нет.
+
+        Исходник 842x380 (2.22:1) в боксе 16/9 только уменьшается (0.94x).
+    --}}
     <x-section tone="canvas" spacing="default">
-        <div class="grid gap-10 lg:grid-cols-2 lg:items-center lg:gap-16">
-            <div>
+        <div class="grid gap-10 lg:grid-cols-12 lg:items-center lg:gap-16">
+            <div class="lg:col-span-5">
                 <x-section-heading
                     eyebrow="Вкус начинается с хороших продуктов"
                     title="То, что собирает нас за одним столом"
@@ -186,7 +262,14 @@
                 />
             </div>
 
-            <x-media variant="lifestyle" ratio="3/2" />
+            <div class="lg:col-span-7">
+                <x-media
+                    src="images/04_family_lifestyle.jpg"
+                    alt="Семейная трапеза"
+                    variant="lifestyle"
+                    ratio="16/9"
+                />
+            </div>
         </div>
     </x-section>
 
