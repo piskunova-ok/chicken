@@ -69,6 +69,38 @@ final class ProductCatalogSeederTest extends TestCase
         'additional_info',
     ];
 
+    /**
+     * Утверждённый заказчиком ассортимент мяса кур: название => описание.
+     *
+     * Это снимок подтверждённого текста, а не источник данных: страницы
+     * берут товары из базы, а массивы товаров удалены из config/catalog.php,
+     * чтобы список жил в одном месте. Снимок нужен, чтобы случайная правка
+     * формулировки в seeder ломала тест, а не проходила незаметно.
+     *
+     * @var array<string, string>
+     */
+    private const CONFIRMED_CHICKEN = [
+        'Тушка курицы' => 'Целая тушка — универсальный вариант для запекания, приготовления бульонов, первых и вторых блюд.',
+        'Окорочка' => 'Для запекания, тушения, жарки и приготовления на гриле.',
+        'Куриные бёдра' => 'Части курицы для горячих блюд, запекания и тушения.',
+        'Куриные сердца' => 'Субпродукт для горячих блюд, тушения, салатов и закусок.',
+        'Куриная печень' => 'Продукт для паштетов, горячих блюд, закусок и домашней кухни.',
+        'Суповые наборы' => 'Вариант для приготовления бульонов, супов и других первых блюд.',
+        'Другие продукты' => 'Ассортимент куриной продукции дополняется другими позициями. Актуальное наличие и характеристики можно уточнить у наших специалистов.',
+    ];
+
+    /**
+     * Временные позиции яиц: подтверждённого ассортимента заказчика за ними
+     * не стоит, описаний у них нет.
+     *
+     * @var list<array{name: string, slug: string}>
+     */
+    private const CONFIRMED_EGGS = [
+        ['name' => 'Вариант продукции 01', 'slug' => 'variant-01'],
+        ['name' => 'Вариант продукции 02', 'slug' => 'variant-02'],
+        ['name' => 'Вариант продукции 03', 'slug' => 'variant-03'],
+    ];
+
     // ------------------------------------------------------------------
     // 1. Категории
     // ------------------------------------------------------------------
@@ -293,56 +325,68 @@ final class ProductCatalogSeederTest extends TestCase
     }
 
     // ------------------------------------------------------------------
-    // 6. Совпадение с источником
+    // 6. Совпадение с подтверждённым текстом
     // ------------------------------------------------------------------
 
-    public function test_chicken_descriptions_match_the_config_source_verbatim(): void
+    public function test_chicken_descriptions_match_the_confirmed_text_verbatim(): void
     {
         $this->seed(ProductCatalogSeeder::class);
 
-        $source = collect(config('catalog.chicken.catalog.items'))
+        $seeded = $this->category('chicken')->products()
+            ->orderBy('sort_order')
+            ->get()
             ->keyBy('name');
 
-        $this->assertCount(7, $source, 'Конфиг должен содержать 7 позиций мяса кур.');
+        $this->assertCount(
+            count(self::CONFIRMED_CHICKEN),
+            $seeded,
+            'Список товаров мяса кур в базе не совпадает с подтверждённым.',
+        );
 
-        foreach ($this->category('chicken')->products as $product) {
-            $this->assertArrayHasKey(
-                $product->name,
-                $source->all(),
-                "Товара «{$product->name}» нет в config/catalog.php: перенесён неподтверждённый товар.",
+        foreach (self::CONFIRMED_CHICKEN as $name => $description) {
+            $this->assertTrue(
+                $seeded->has($name),
+                "Товара «{$name}» нет среди подтверждённых: перенесён лишний товар.",
             );
 
             $this->assertSame(
-                $source[$product->name]['short_description'] ?? null,
-                $product->short_description,
-                "Описание товара «{$product->name}» не совпадает с config/catalog.php дословно.",
+                $description,
+                $seeded[$name]->short_description,
+                "Описание товара «{$name}» изменено: оно должно совпадать с утверждённым текстом дословно.",
             );
         }
     }
 
-    public function test_chicken_names_and_order_match_the_config_source(): void
+    public function test_chicken_names_and_order_match_the_confirmed_text(): void
     {
         $this->seed(ProductCatalogSeeder::class);
 
-        $expected = array_column(config('catalog.chicken.catalog.items'), 'name');
-
         $this->assertSame(
-            $expected,
+            array_keys(self::CONFIRMED_CHICKEN),
             $this->category('chicken')->products()->orderBy('sort_order')->pluck('name')->all(),
-            'Названия и порядок товаров мяса кур должны совпадать с config/catalog.php.',
+            'Названия и порядок товаров мяса кур должны совпадать с утверждённым ассортиментом.',
         );
     }
 
-    public function test_eggs_names_match_the_config_source(): void
+    public function test_eggs_names_match_the_confirmed_text(): void
     {
         $this->seed(ProductCatalogSeeder::class);
 
-        $expected = array_column(config('catalog.eggs.catalog.items'), 'name');
-
         $this->assertSame(
-            $expected,
+            array_column(self::CONFIRMED_EGGS, 'name'),
             $this->category('eggs')->products()->orderBy('sort_order')->pluck('name')->all(),
         );
+    }
+
+    public function test_eggs_temporary_products_never_gain_a_description(): void
+    {
+        $this->seed(ProductCatalogSeeder::class);
+
+        // Утверждённых описаний для временных позиций яиц нет нигде, и
+        // seeder не имеет права их сочинить.
+        foreach ($this->category('eggs')->products as $product) {
+            $this->assertNull($product->short_description);
+        }
     }
 
     /**

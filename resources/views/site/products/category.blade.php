@@ -2,9 +2,17 @@
     СТРАНИЦА КАТЕГОРИИ ПРОДУКЦИИ.
 
     Общая страница для всех категорий: /products/eggs и /products/chicken.
-    Никаких данных не придумывается в разметке — всё приходит из
-    config/catalog.php через маршрут, а Blade только выводит переданный
-    массив в цикле.
+
+    Источники данных разделены:
+        SQLite + Eloquent -> $category и $products (заголовок h1, хлебные
+                             крошки и сетка карточек);
+        config/catalog.php -> оформление и тексты страницы (eyebrow, hero,
+                             intro, meta_description, заголовок и пометка
+                             блока каталога, CTA).
+
+    Разделение временное: заказчиком подтверждены только категории и
+    товары, поэтому переносить в базу оформление нельзя — для него ещё
+    нет ни колонок, ни данных.
 
     Структура страницы:
         1. Хлебные крошки
@@ -14,13 +22,13 @@
 
     Чего здесь сознательно нет: цен, веса, фасовки, типа упаковки, срока
     годности, условий хранения, пищевой ценности и наличия позиций. Эти
-    сведения не подтверждены заказчиком, поэтому их нет и в конфиге, и
+    сведения не подтверждены заказчиком, поэтому в базе они NULL, и
     карточки их не выводят. Страница не создаёт впечатления, что сайт
     продаёт, а информирует о разделе, который готовится.
 
-    Заголовок h1 и тексты взяты из config/site.php и config/catalog.php.
-    Страница товара на этом этапе не создаётся, поэтому «Подробнее» в
-    карточках неактивно и не ведёт на 404.
+    Название категории для h1 и крошек берётся из базы, а тексты остаются
+    в config/catalog.php и config/site.php. Страница товара на этом этапе
+    не создаётся, поэтому «Подробнее» в карточках не выводится.
 --}}
 
 @php
@@ -28,24 +36,28 @@
      | Хлебные крошки. «Продукция» намеренно остаётся текстом без ссылки:
      | отдельной страницы /products на этом этапе нет, и ссылка на неё
      | привела бы к 404.
+     |
+     | Название последнего элемента — из базы: категория пришла из Eloquent.
      */
     $breadcrumbs = [
         ['label' => 'Главная', 'url' => route('home')],
         ['label' => 'Продукция', 'url' => null],
-        ['label' => $product['name'], 'url' => null],
+        ['label' => $category->name, 'url' => null],
     ];
 
     $catalog = $catalog ?? [];
     $catalogBlock = $catalog['catalog'] ?? [];
-    $items = (array) ($catalogBlock['items'] ?? []);
 
     /*
      | Мета-описание приходит из конфига, а заголовок собирается из названия
-     | категории и названия компании: оба значения уже есть в проекте, и
-     | дублировать их в catalog.php не нужно.
+     | категории (из базы) и названия компании: оба значения уже есть в
+     | проекте, и дублировать их в catalog.php не нужно.
+     |
+     | $page — запись категории из config/site.php. Используется только как
+     | запасной источник описания: список товаров отсюда больше не берётся.
      */
-    $pageTitle = $product['name'].' — '.config('site.name');
-    $pageDescription = $catalog['meta_description'] ?? $product['description'];
+    $pageTitle = $category->name.' — '.config('site.name');
+    $pageDescription = $catalog['meta_description'] ?? ($page['description'] ?? null);
 @endphp
 
 <x-layouts.app :title="$pageTitle" :description="$pageDescription">
@@ -69,7 +81,7 @@
             <div class="lg:col-span-5">
                 <x-section-heading
                     :eyebrow="$catalog['eyebrow'] ?? 'Продукция'"
-                    :title="$product['name']"
+                    :title="$category->name"
                     :lead="$catalog['intro'] ?? null"
                     level="h1"
                 />
@@ -77,15 +89,15 @@
 
             <div class="lg:col-span-7">
                 {{--
-                    asset() обязателен: в конфиге (а позже и в БД) путь хранится
-                    относительным — «images/02_eggs.jpg». На главной, где URL
-                    равен «/», такой путь случайно работает, но на
-                    /products/eggs браузер запросил бы /products/images/… и
-                    получил 404. Ссылка должна строиться от корня сайта.
+                    asset() обязателен: в конфиге путь хранится относительным —
+                    «images/02_eggs.jpg». На главной, где URL равен «/», такой
+                    путь случайно работает, но на /products/eggs браузер
+                    запросил бы /products/images/… и получил 404. Ссылка
+                    должна строиться от корня сайта.
                 --}}
                 <x-media
                     :src="filled($catalog['image'] ?? null) ? asset($catalog['image']) : null"
-                    :alt="$catalog['image_alt'] ?? $product['name']"
+                    :alt="$catalog['image_alt'] ?? $category->name"
                     variant="hero"
                     ratio="16/9"
                     priority
@@ -116,30 +128,46 @@
             desktop. Одинаковая высота карточек обеспечивается h-full и
             mt-auto у кнопки, поэтому описания и кнопки выравниваются по
             нижнему краю независимо от длины текста.
+
+            $products — активные товары этой категории из базы, уже в
+            порядке sort_order, а массив товаров из config/catalog.php
+            страница больше не читает.
         --}}
         <ul class="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            @foreach ($items as $item)
+            @foreach ($products as $product)
                 <li class="flex">
                     {{--
-                        Путь к фото (сейчас у всех позиций null — показывается
-                        локальная заглушка) оборачивается в asset() уже сейчас,
-                        чтобы при появлении реальных файлов в конфиге или БД
-                        не понадобилась правка разметки. null превращается в
-                        null, а не в «/».
+                        Путь к фото хранится относительным — «images/…»,
+                        поэтому оборачивается в asset(). У всех позиций поле
+                        image пока NULL, и asset() не вызывается вовсе: так
+                        на месте фотографии остаётся локальная заглушка.
+                        null превращается в null, а не в «/».
+
+                        Характеристики приходят из cardSpecs() модели: сейчас
+                        все значения NULL, и компонент не выводит ни одной
+                        строки. Подтверждённые значения появятся сами.
+
+                        image-alt не передаётся: в таблице products такой
+                        колонки нет, а подставлять выдуманный alt значило бы
+                        описать несуществующую фотографию.
+
+                        details-url не передаётся: страниц отдельных товаров
+                        ещё нет, поэтому кнопка «Подробнее» не выводится и
+                        ссылка на 404 невозможна. Когда страницы появятся,
+                        колонка и одно пропс добавятся здесь.
                     --}}
                     <x-product-card
                         class="w-full"
-                        :name="$item['name']"
-                        :image="filled($item['photo'] ?? null) ? asset($item['photo']) : null"
-                        :image-alt="$item['photo_alt'] ?? null"
-                        :short-description="$item['short_description'] ?? null"
-                        :specs="$item['specs'] ?? []"
-                        :additional-info="$item['additional_info'] ?? null"
-                        :details-url="$item['details_url'] ?? null"
+                        :name="$product->name"
+                        :image="filled($product->image) ? asset($product->image) : null"
+                        :short-description="$product->short_description"
+                        :specs="$product->cardSpecs()"
+                        :additional-info="$product->additional_info"
                     />
                 </li>
             @endforeach
         </ul>
+
     </x-section>
 
     {{-- ============================== CTA ============================ --}}
