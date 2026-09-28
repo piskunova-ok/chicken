@@ -9,6 +9,7 @@ use App\Models\ProductCategory;
 use Database\Seeders\ProductCatalogSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 /**
@@ -315,13 +316,19 @@ final class ProductCategoryPageTest extends TestCase
         $this->assertNull(Product::where('name', 'Тушка курицы')->value('image'));
     }
 
-    public function test_a_real_image_path_is_turned_into_an_absolute_url(): void
+    /**
+     * Загруженные через админку изображения (disk 'public', каталог
+     * products) страница показывает URL-ом публичного диска. Раньше здесь
+     * был asset(): он предполагал относительный путь внутри public/, а
+     * загрузки живут в storage/app/public и отдаются через /storage.
+     */
+    public function test_a_real_image_path_is_turned_into_a_public_disk_url(): void
     {
-        Product::where('name', 'Тушка курицы')->update(['image' => 'images/tushka.jpg']);
+        Product::where('name', 'Тушка курицы')->update(['image' => 'products/tushka.jpg']);
 
         $this->get('/products/chicken')
             ->assertOk()
-            ->assertSee('src="'.asset('images/tushka.jpg').'"', false);
+            ->assertSee('src="'.Storage::disk('public')->url('products/tushka.jpg').'"', false);
     }
 
     public function test_the_details_button_is_absent_without_a_details_url(): void

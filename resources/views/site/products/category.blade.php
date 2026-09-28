@@ -137,9 +137,11 @@
             @foreach ($products as $product)
                 <li class="flex">
                     {{--
-                        Путь к фото хранится относительным — «images/…»,
-                        поэтому оборачивается в asset(). У всех позиций поле
-                        image пока NULL, и asset() не вызывается вовсе: так
+                        Путь к фото загружается через админку и хранится
+                        относительным к публичному диску — «products/<ulid>.jpg»,
+                        поэтому превращается в абсолютный URL публичного диска
+                        через Storage::disk('public')->url(). У всех позиций
+                        поле image пока NULL, и url() не вызывается вовсе: так
                         на месте фотографии остаётся локальная заглушка.
                         null превращается в null, а не в «/».
 
@@ -159,7 +161,7 @@
                     <x-product-card
                         class="w-full"
                         :name="$product->name"
-                        :image="filled($product->image) ? asset($product->image) : null"
+                        :image="filled($product->image) ? Illuminate\Support\Facades\Storage::disk('public')->url($product->image) : null"
                         :short-description="$product->short_description"
                         :specs="$product->cardSpecs()"
                         :additional-info="$product->additional_info"

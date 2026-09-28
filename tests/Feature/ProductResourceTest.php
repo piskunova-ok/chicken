@@ -18,8 +18,10 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Facades\Filament;
 use Illuminate\Contracts\Pagination\Paginator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -1108,16 +1110,45 @@ class ProductResourceTest extends TestCase
 
     /*
     |--------------------------------------------------------------------------
-    | 8. Изображение не загружается
+    | 8. Изображение товара
     |--------------------------------------------------------------------------
+    |
+    | Загрузка изображений перенесена на страницу поля FileUpload
+    | (диск, каталог, типы, замена, очистка) в ProductImageUploadTest.
+    | Здесь остаётся привязка к правам и целостности формы: существующий
+    | редактор без изменений изображения не трогает ни поле, ни файл, а
+    | создание товара с изображением кладёт в products.image относительный
+    | путь публичного диска.
+    |
+    | История: до Этапа 9.4 здесь был тест, который специально подтверждал
+    | ОТСУТСТВИЕ FileUpload в форме. Он противоречил новой функциональности
+    | и заменён проверками ниже (см. ProductImageUploadTest — полный сценарий
+    | загрузки, замены и очистки файла).
     */
 
-    public function test_the_form_has_no_image_field_and_no_upload(): void
+    public function test_editing_other_fields_leaves_the_image_path_untouched(): void
     {
         $this->actingAsAdmin();
 
         $product = $this->productIn($this->eggs());
         $imageBefore = $product->image;
+
+        Livewire::test(EditProduct::class, ['record' => $product->getKey()])
+            ->fillForm(['name' => 'Переименованный товар'])
+            ->call('save');
+
+        $this->assertSame(
+            $imageBefore,
+            $product->fresh()->image,
+            'Правка названия не должна изменять изображение.',
+        );
+    }
+
+    public function test_the_form_has_an_image_fileupload_field(): void
+    {
+        $this->actingAsAdmin();
+
+        $product = $this->productIn($this->eggs());
 
         $form = Livewire::test(EditProduct::class, ['record' => $product->getKey()])
             ->instance()
@@ -1128,23 +1159,34 @@ class ProductResourceTest extends TestCase
             $form->getComponents(withHidden: true),
         );
 
-        /*
-         * Загрузка файлов — Этап 9.4. Пока в форме нет ни FileUpload, ни
-         * работы с хранилищем; тест фиксирует именно это, чтобы появление
-         * загрузки не прошло молча.
-         */
-        $this->assertNotContains('image', $fieldNames);
+        $this->assertContains('image', $fieldNames);
 
-        $this->assertFalse(
+        $this->assertTrue(
             $this->formHasFileUpload($form->getComponents(withHidden: true)),
-            'В форме товара не должно быть загрузки файлов: это отдельный этап.',
+            'В форме должен быть FileUpload для поля image.',
         );
+    }
 
-        $this->assertSame(
-            $imageBefore,
-            $product->fresh()->image,
-            'Изображение не должно было измениться.',
-        );
+    public function test_creating_a_product_with_an_image_writes_a_relative_public_disk_path(): void
+    {
+        $this->actingAsAdmin();
+        Storage::fake('public');
+
+        $category = $this->eggs();
+
+        Livewire::test(CreateProduct::class)
+            ->fillForm([
+                'product_category_id' => $category->getKey(),
+                'name' => self::NEW_NAME,
+                'slug' => self::NEW_SLUG,
+                'image' => UploadedFile::fake()->create('photo.jpg', 10, 'image/jpeg'),
+            ])
+            ->call('create');
+
+        $product = Product::query()->where('slug', self::NEW_SLUG)->firstOrFail();
+
+        $this->assertMatchesRegularExpression('#^products/[A-Za-z0-9_-]+\.jpg$#', $product->image);
+        Storage::disk('public')->assertExists($product->image);
     }
 
     /**

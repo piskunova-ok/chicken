@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Products\Schemas;
 
 use App\Models\Product;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -19,17 +20,42 @@ use Illuminate\Validation\Rules\Unique;
  *
  * ПОЛЯ РОВНО ТЕ, ЧТО ЕСТЬ В ТАБЛИЦЕ products
  *
- * В форме одиннадцать полей, и это все колонки products, кроме служебных
- * (id, image, created_at, updated_at). Выдумывать поля, которых в схеме нет,
+ * В форме двенадцать полей, и это все колонки products, кроме служебных
+ * (id, created_at, updated_at). Выдумывать поля, которых в схеме нет,
  * нельзя, а служебные колонки администратору нечего редактировать.
  *
- * ЧТО НЕ ПОКАЗАНО И ПОЧЕМУ
+ * ИЗОБРАЖЕНИЕ ТОВАРА
  *
- * image в форму не выведено. Колонка есть, но загрузка файлов и работа с
- * хранилищем — отдельная задача: на этом этапе не создаётся FileUpload, не
- * появляется storage:link и не меняется конфигурация файловой системы.
- * Показывать поле только для чтения смысла не имеет: единственное
- * существующее значение лучше видно в самой карточке товара на сайте.
+ * Поле image — FileUpload Filament 5.9. В базу пишется ТОЛЬКО относительный
+ * путь внутри публичного диска: «products/<ulid>.jpg» (или .png/.webp).
+ * Ни абсолютного пути, ни «storage/app/...», ни URL в базу не попадает.
+ *
+ *  - disk('public') — тот же диск, на который смотрит public/storage:
+ *    файл отдаётся браузеру без приложения;
+ *  - directory('products') — все загрузки товара в одной папке, а не в
+ *    корне диска;
+ *  - visibility('public') — публичный диск и так общедоступен, но
+ *    требование зафиксировано явно;
+ *  - image() и acceptedFileTypes(...) — проверка типов ПРОХОДИТ НА
+ *    СЕРВЕРЕ (mimetypes), а не только через accept браузера. Ровно три
+ *    формата каталога: JPEG, PNG, WebP. image() расширяет список до
+ *    «image/*», поэтому уточняющий acceptedFileTypes() вызывается ПОСЛЕ
+ *    него и сужает типы до тройки (оба серверных правила читают итоговый
+ *    список).
+ *  - maxSize(4096) — лимит 4096 КБ (4 МБ), предпочтительный для
+ *    фотографии карточки; текст ошибки даёт lang/ru/validation.php
+ *    (max.file: «не должен превышать :max КБ»);
+ *  - imagePreviewHeight('200') — предпросмотр загруженного файла в форме;
+ *  - preserveFilenames() НЕ задан: имя файла генерируется Filament
+ *    безопасно — Str::ulid() + расширение — и не повторяет имя файла
+ *    администратора.
+ *
+ * ВАЖНО ПРО ОЧИСТКУ И ЗАМЕНУ
+ *
+ * deleteUploadedFileUsing НЕ регистрируется: физическое удаление делает
+ * ЕДИНЫЙ механизм на странице EditProduct (beforeSave/afterSave). Кнопка
+ * «удалить» в поле лишь убирает путь из состояния формы, а старый файл
+ * удаляется после успешного сохранения. См. шапку EditProduct.
  *
  * РАЗДЕЛЕНИЕ НА ДВЕ ЧАСТИ
  *
@@ -195,6 +221,33 @@ class ProductForm
                             ->where('product_category_id', $get('product_category_id')),
                     )
                     ->validationMessages(self::validationMessages()),
+
+                FileUpload::make('image')
+                    ->label('Изображение товара')
+                    /*
+                     * image() обязан стоять ПЕРВЫМ: он задаёт acceptedFileTypes
+                     * «image/*», а следующий за ним acceptedFileTypes() сужает
+                     * список до трёх форматов каталога. В обратном порядке
+                     * уточнение потерялось бы.
+                     */
+                    ->image()
+                    ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
+                    // Публичный диск, на который смотрит public/storage.
+                    ->disk('public')
+                    // Все загрузки товара — в одной папке диска.
+                    ->directory('products')
+                    ->visibility('public')
+                    /*
+                     * 4096 КБ — лимит для фотографии карточки: запас на
+                     * современные снимки, при этом без загружаемых на сайт
+                     * «оригиналов» по 20 МБ. Разумнее объяснить ресайз в
+                     * интерфейсе, чем отбрасывать нормальную фотографию.
+                     */
+                    ->maxSize(4096)
+                    // Предпросмотр загруженного изображения в форме.
+                    ->imagePreviewHeight('200')
+                    ->columnSpanFull()
+                    ->helperText('Формат: JPEG, PNG или WebP; размер — до 4 МБ. Поле пустое, если изображения нет.'),
 
                 Textarea::make('short_description')
                     ->label('Краткое описание')

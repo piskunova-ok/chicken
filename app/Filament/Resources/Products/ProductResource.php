@@ -54,8 +54,11 @@ use Illuminate\Database\Eloquent\Model;
  *
  * ЗАГРУЗКА ИЗОБРАЖЕНИЙ
  *
- * Колонка image в таблице есть, но на этом этапе она не показывается и не
- * загружается: файловый ввод и работа с хранилищем — отдельная задача.
+ * Колонка image — FileUpload на публичном диске (disk 'public', каталог
+ * products). В базе хранится только относительный путь «products/<файл>»,
+ * публичный URL строится через Storage::disk('public')->url(). Физическое
+ * удаление старого файла при замене/очистке — на странице EditProduct
+ * (beforeSave/afterSave), подробности в её шапке.
  */
 class ProductResource extends Resource
 {
