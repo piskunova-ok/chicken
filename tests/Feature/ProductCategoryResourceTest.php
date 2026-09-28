@@ -332,6 +332,44 @@ class ProductCategoryResourceTest extends TestCase
             ->assertHasFormErrors(['name']);
     }
 
+    public function test_a_required_error_is_shown_in_russian_not_as_a_key(): void
+    {
+        $this->actingAsAdmin();
+
+        $component = Livewire::test(EditProductCategory::class, ['record' => $this->eggs()->getKey()])
+            ->fillForm(['name' => ''])
+            ->call('save')
+            ->assertHasFormErrors(['name' => 'required']);
+
+        $this->assertSame(
+            ['Поле «название» обязательно для заполнения.'],
+            $component->errors()->get('data.name'),
+            'Ошибка required у категории должна звучать по-русски, а не ключом validation.required.',
+        );
+    }
+
+    public function test_a_too_long_category_name_is_rejected_with_a_russian_message(): void
+    {
+        $this->actingAsAdmin();
+
+        $component = Livewire::test(EditProductCategory::class, ['record' => $this->eggs()->getKey()])
+            ->fillForm(['name' => str_repeat('а', 256)])
+            ->call('save')
+            ->assertHasFormErrors(['name' => 'max']);
+
+        $message = $component->errors()->get('data.name')[0] ?? '';
+
+        $this->assertMatchesRegularExpression('/[а-яё]/iu', $message, 'Ошибка max должна быть на русском.');
+        $this->assertStringNotContainsString(
+            'validation.',
+            $message,
+            'Внутри ошибки не должно быть сырых ключей перевода.',
+        );
+        $this->assertStringContainsString('255', $message, 'В сообщении должна быть видна граница длины.');
+
+        $this->assertSame('Яйца кур', $this->eggs()->fresh()->name, 'Запись не должна измениться при отказе.');
+    }
+
     public function test_an_admin_can_deactivate_a_category_from_the_form(): void
     {
         $this->actingAsAdmin();
