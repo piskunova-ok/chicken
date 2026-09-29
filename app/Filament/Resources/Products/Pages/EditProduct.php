@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Products\Pages;
 
 use App\Filament\Resources\Products\ProductResource;
+use App\Models\Product;
 use Filament\Resources\Pages\EditRecord;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 /**
  * Редактирование товара.
@@ -34,12 +37,16 @@ use Illuminate\Support\Facades\Storage;
  *  2. validation — при ошибке сохранение прерывается, handleRecordUpdate
  *     и afterSave НЕ выполняются, старый файл и БД не трогаются;
  *  3. handleRecordUpdate() — запись получает новый путь (или NULL);
+ *     если запись падает, здесь же удаляется НОВЫЙ файл, который dehydrate
+ *     уже положил на диск, а исходное исключение пробрасывается дальше:
+ *     иначе новый файл остался бы без ссылки в БД;
  *  4. afterSave() — ЗДЕСЬ удаляется старый файл, только если он существует,
  *     отличается от нового пути и лежит внутри public disk/products.
  *
  * Поэтому: новый файл всегда сохранён и записан в БД до удаления старого,
- * при ошибке validation ничего не удаляется, а удалить можно только файл
- * этого товара в безопасном каталоге public disk. После Create ничего
+ * при ошибке validation ничего не удаляется, при ошибке записи удаляется
+ * только неиспользуемый новый файл, а удалить можно только файл этого
+ * товара в безопасном каталоге public disk. После Create ничего
  * удалять не нужно: старого файла у новой записи нет.
  */
 class EditProduct extends EditRecord
@@ -62,6 +69,76 @@ class EditProduct extends EditRecord
     protected function beforeSave(): void
     {
         $this->previousImage = $this->record->getOriginal('image');
+    }
+
+    /**
+     * Запись товара с уборкой НОВОГО файла, если запись не удалась.
+     *
+     * Окно утечки: FileUpload сохраняет новый файл на публичный диск
+     * ещё при dehydrate формы, то есть ДО этого метода (EditRecord::save,
+     * вендор: getState() на строке 168, handleRecordUpdate() на 176).
+     * Если запись падает, транзакция откатывается, products.image
+     * сохраняет старый путь, а новый файл остаётся на диске без ссылок.
+     *
+     * Здесь и только здесь это окно закрывается: удаляем новый файл и
+     * пробрасываем исходное исключение дальше. Нормальный успешный путь
+     * не изменён — метод лишь оборачивает штатный update.
+     */
+    protected function handleRecordUpdate(Model $record, array $data): Model
+    {
+        $previousImage = Product::query()
+            ->whereKey($record->getKey())
+            ->value('image');
+
+        try {
+            return parent::handleRecordUpdate($record, $data);
+        } catch (Throwable $exception) {
+            $this->deleteUncommittedImage($data, $previousImage);
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * Удаляет новый файл, который не был записан в БД из-за сбоя.
+     *
+     * Условия удаления, все обязательны:
+     *  - путь стал новым значением image в данных формы;
+     *  - путь управляемый: products/ без выхода за каталог;
+     *  - путь отличается от сохранённого в БД старого изображения;
+     *  - на путь не ссылается ни одна запись products.image — файл
+     *    может быть общим, удалять его нельзя.
+     *
+     * Ошибка удаления не должна скрывать исходную ошибку записи, поэтому
+     * проглатывается.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function deleteUncommittedImage(array $data, ?string $previousImage): void
+    {
+        $newImage = $data['image'] ?? null;
+
+        if (! is_string($newImage) || $newImage === '') {
+            return;
+        }
+
+        if ($newImage === $previousImage) {
+            return;
+        }
+
+        if (! $this->isManagedProductImagePath($newImage)) {
+            return;
+        }
+
+        if (Product::query()->where('image', $newImage)->exists()) {
+            return;
+        }
+
+        try {
+            Storage::disk('public')->delete($newImage);
+        } catch (Throwable) {
+            // Исходная ошибка записи важнее ошибки уборки: её пробрасываем.
+        }
     }
 
     /**
