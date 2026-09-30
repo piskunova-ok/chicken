@@ -131,6 +131,25 @@ final class PublicPagesTest extends TestCase
         $this->get('/products/eggs')->assertNotFound();
     }
 
+    public function test_the_products_page_keeps_listing_a_category_whose_products_are_hidden(): void
+    {
+        // Категория активна, но все её товары выключены. Обзорная страница
+        // перечисляет категории, а не позиции, поэтому «Яйца кур» обязаны
+        // остаться: исчезновение категории выглядело бы как удаление
+        // раздела, а его никто не удалял.
+        $eggsId = ProductCategory::where('slug', 'eggs')->value('id');
+        $this->assertGreaterThan(0, Product::where('product_category_id', $eggsId)->update(['is_active' => false]));
+
+        $response = $this->get('/products')->assertOk();
+
+        $response->assertSee('Яйца кур');
+        $response->assertSee(route('products.eggs'), false);
+        $response->assertSee('Мясо кур');
+
+        // И ссылка ведёт на живую страницу, а не на 404.
+        $this->get('/products/eggs')->assertOk();
+    }
+
     public function test_the_products_page_has_exactly_one_h1(): void
     {
         $response = $this->get('/products')->assertOk();

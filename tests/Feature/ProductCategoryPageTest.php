@@ -181,7 +181,130 @@ final class ProductCategoryPageTest extends TestCase
         // Сама категория активна, поэтому страница существует, но пустая
         // сетка лучше 404: раздел открыт, ассортимент временно скрыт.
         $this->assertSame(0, $this->cardCount($response->getContent()));
-        $response->assertSee('Наш ассортимент', false);
+        $response->assertSee('data-catalog-empty', false);
+    }
+
+    // ------------------------------------------------------------------
+    // Активная категория без активных товаров
+    // ------------------------------------------------------------------
+
+    public function test_the_eggs_page_renders_the_empty_state_when_no_product_is_active(): void
+    {
+        $this->deactivateAllProducts();
+
+        $response = $this->get('/products/eggs')->assertOk();
+
+        // Категория активна, страница живёт — это не 404.
+        $this->assertSame(0, $this->cardCount($response->getContent()));
+        $this->assertStringContainsString('data-catalog-empty', $response->getContent());
+        $response->assertSee(config('content.catalog.empty_text'), false);
+    }
+
+    public function test_deactivated_technical_eggs_products_disappear_from_the_page(): void
+    {
+        $this->deactivateAllProducts();
+
+        $response = $this->get('/products/eggs')->assertOk();
+
+        $this->assertSame(0, $this->cardCount($response->getContent()));
+
+        foreach (self::EGGS_ORDER as $name) {
+            $response->assertDontSee($name);
+        }
+
+        foreach (['variant-01', 'variant-02', 'variant-03'] as $slug) {
+            $response->assertDontSee('/products/'.$slug, false);
+        }
+
+        // Записи остались в базе — их выключили, а не удалили.
+        $this->assertSame(3, Product::where('product_category_id', $this->categoryId('eggs'))->count());
+        $this->assertSame(0, Product::where('product_category_id', $this->categoryId('eggs'))->where('is_active', true)->count());
+    }
+
+    public function test_the_empty_state_makes_no_claim_about_stock(): void
+    {
+        $this->deactivateAllProducts();
+
+        $response = $this->get('/products/eggs')->assertOk();
+        $html = $response->getContent();
+
+        // Фактического наличия продукции проект не знает, поэтому ни сам
+        // блок, ни страница не имеют права утверждать что-либо о нём.
+        // Проверяем именно блок, а не всю страницу: на других категориях
+        // в текстах есть нейтральные фразы вроде «актуальное наличие», и
+        // запрещать их здесь означало бы запрещать чужие формулировки.
+        $this->assertStringNotContainsStringIgnoringCase('наличи', $this->emptyStateText($html));
+        $this->assertStringNotContainsStringIgnoringCase('распродан', $this->emptyStateText($html));
+        $this->assertStringNotContainsStringIgnoringCase('закончил', $this->emptyStateText($html));
+
+        // «Нет в наличии» — прямая ложь о поставках, её на странице быть
+        // не должно ни при каких обстоятельствах.
+        $this->assertStringNotContainsStringIgnoringCase('нет в наличии', $this->visibleText($html));
+        $this->assertStringNotContainsStringIgnoringCase('нет на складе', $this->visibleText($html));
+    }
+
+    public function test_the_catalog_heading_returns_as_soon_as_one_product_is_active(): void
+    {
+        $this->deactivateAllProducts();
+
+        $empty = $this->get('/products/eggs')->assertOk();
+        $this->assertStringContainsString('data-catalog-empty', $empty->getContent());
+
+        // Возвращаем один товар: блок ассортимента и его прежний заголовок
+        // обязаны вернуться сами, без правок конфига.
+        Product::where('name', 'Вариант продукции 01')->update(['is_active' => true]);
+
+        $filled = $this->get('/products/eggs')->assertOk();
+
+        $this->assertStringNotContainsString('data-catalog-empty', $filled->getContent());
+        $filled->assertDontSee(config('content.catalog.empty_text'), false);
+        $filled->assertSee(config('catalog.eggs.catalog.heading'), false);
+        $filled->assertSee(config('catalog.eggs.catalog.lead'), false);
+        $filled->assertSee('Вариант продукции 01');
+        $this->assertSame(1, $this->cardCount($filled->getContent()));
+    }
+
+    public function test_the_empty_state_works_for_any_active_category_not_only_eggs(): void
+    {
+        $this->deactivateAllProducts();
+
+        foreach (['eggs', 'chicken'] as $slug) {
+            $response = $this->get('/products/'.$slug)->assertOk();
+
+            $this->assertStringContainsString(
+                'data-catalog-empty',
+                $response->getContent(),
+                "Пустая категория {$slug} обязана показывать блок об обновлении ассортимента.",
+            );
+            $response->assertSee(config('content.catalog.empty_text'), false);
+            $this->assertSame(0, $this->cardCount($response->getContent()));
+        }
+    }
+
+    public function test_deactivating_eggs_products_leaves_the_chicken_page_untouched(): void
+    {
+        $before = $this->get('/products/chicken')->assertOk();
+        $this->assertSame(7, $this->cardCount($before->getContent()));
+
+        // Выключаем только яйца — ровно то изменение, которое делает этап 11
+        // в рабочей базе. Страница мяса кур не должна почувствовать его ни
+        // одним байтом.
+        $eggsId = $this->categoryId('eggs');
+        $this->assertSame(3, Product::where('product_category_id', $eggsId)->update(['is_active' => false]));
+
+        $after = $this->get('/products/chicken')->assertOk();
+
+        // Семь карточек мяса кур на месте, пустого блока нет.
+        $this->assertSame(7, $this->cardCount($after->getContent()));
+        $this->assertStringNotContainsString('data-catalog-empty', $after->getContent());
+        $after->assertSeeInOrder(self::CHICKEN_ORDER);
+        $after->assertSee(config('catalog.chicken.catalog.heading'), false);
+
+        // Содержимое страницы не изменилось ни на байт.
+        $this->assertSame(
+            $this->visibleText($before->getContent()),
+            $this->visibleText($after->getContent()),
+        );
     }
 
     // ------------------------------------------------------------------
@@ -395,6 +518,24 @@ final class ProductCategoryPageTest extends TestCase
     }
 
     /**
+     * Видимый текст блока пустого состояния каталога.
+     *
+     * Блок помечен атрибутом data-catalog-empty именно ради таких проверок:
+     * по нему видно, что страница честно сообщила об отсутствии позиций, а
+     * не просто потеряла разметку.
+     */
+    private function emptyStateText(string $html): string
+    {
+        $this->assertSame(
+            1,
+            preg_match('/<div[^>]*data-catalog-empty[^>]*>(.*?)<\/div>/s', $html, $match),
+            'На странице без активных товаров должен быть ровно один блок пустого состояния.',
+        );
+
+        return $this->visibleText($match[1]);
+    }
+
+    /**
      * Число карточек товара на странице.
      *
      * На странице категории тег article используется только карточкой
@@ -403,6 +544,40 @@ final class ProductCategoryPageTest extends TestCase
     private function cardCount(string $html): int
     {
         return substr_count($html, '<article');
+    }
+
+    /**
+     * Видимый текст страницы без разметки.
+     *
+     * Побайтовое сравнение HTML здесь не годится: Livewire подмешивает
+     * служебный <style> в первую отрисовку процесса и не подмешивает его
+     * во вторую, поэтому один и тот же адрес сравнивается как разные строки
+     * в зависимости от порядка тестов. Сравнение видимого текста проверяет
+     * именно то, что видит посетитель, и не зависит от служебной разметки.
+     */
+    private function visibleText(string $html): string
+    {
+        // Служебные <style> и <script> вырезаются вместе с содержимым:
+        // Livewire подмешивает их не в каждую отрисовку, и они не являются
+        // тем, что видит посетитель.
+        $html = preg_replace('/<(style|script)\b[^>]*>.*?<\/\1>/is', ' ', $html) ?? $html;
+        $text = preg_replace('/<[^>]+>/', ' ', $html) ?? $html;
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        return trim((string) preg_replace('/\s+/u', ' ', $text));
+    }
+
+    /**
+     * Выключает все товары обеих категорий.
+     *
+     * Именно то состояние, которое заказчик получит на рабочей базе после
+     * этапа 11: категории активны, позиции внутри них скрыты. Сценарий не
+     * привязан к «Яйцам кур» — так проверяется, что пустое состояние
+     * появляется у любой активной категории.
+     */
+    private function deactivateAllProducts(): void
+    {
+        $this->assertGreaterThan(0, Product::query()->update(['is_active' => false]));
     }
 
     /**

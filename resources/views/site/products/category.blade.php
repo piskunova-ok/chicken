@@ -49,6 +49,37 @@
     $catalogBlock = $catalog['catalog'] ?? [];
 
     /*
+     | Есть ли в категории активные товары. Это единственный признак, по
+     | которому меняется заголовок блока ассортимента: пока позиции есть,
+     | заголовок обещает выбор вариантов и он правдив; когда активных
+     | товаров нет, обещание становится ошибкой, и его место занимает
+     | сообщение об обновлении ассортимента.
+     |
+     | Признак общий для всех категорий, а не частный для «Яиц кур»: пустая
+     | категория — это состояние любой категории, у которой позиции
+     | временно выключены. Тексты лежат в config/content.php, поэтому
+     | одна правка меняет поведение везде, а не в одной странице.
+     */
+    $hasProducts = $products->isNotEmpty();
+
+    /*
+     | Заголовок и лид блока. С товарами — прежние значения категории из
+     | config/catalog.php, без изменений; без товаров — сообщение из
+     | config/content.php, переопределяемое ключами empty_title и
+     | empty_text в блоке самой категории.
+     |
+     | Лид блока при пустом ассортименте не выводится вовсе: он описывает
+     | предлагаемые варианты и упаковку, которых на странице нет.
+     */
+    $catalogHeading = $hasProducts
+        ? ($catalogBlock['heading'] ?? 'Ассортимент')
+        : ($catalogBlock['empty_title'] ?? config('content.catalog.empty_title', 'Ассортимент'));
+
+    $catalogLead = $hasProducts ? ($catalogBlock['lead'] ?? null) : null;
+
+    $catalogEmptyText = $catalogBlock['empty_text'] ?? config('content.catalog.empty_text');
+
+    /*
      | Мета-описание приходит из конфига, а заголовок собирается из названия
      | категории (из базы) и названия компании: оба значения уже есть в
      | проекте, и дублировать их в catalog.php не нужно.
@@ -109,8 +140,8 @@
     {{-- ============================ КАТАЛОГ ========================== --}}
     <x-section tone="surface" spacing="default">
         <x-section-heading
-            :title="$catalogBlock['heading'] ?? 'Ассортимент'"
-            :lead="$catalogBlock['lead'] ?? null"
+            :title="$catalogHeading"
+            :lead="$catalogLead"
         />
 
         @if (filled($catalogBlock['notice'] ?? null))
@@ -132,43 +163,68 @@
             $products — активные товары этой категории из базы, уже в
             порядке sort_order, а массив товаров из config/catalog.php
             страница больше не читает.
+
+            Сетка выводится только когда есть что в ней показать. Раньше
+            <ul> рендерился всегда, и при нуле активных товаров на странице
+            оставалось пустое место после заголовка, обещающего выбор
+            вариантов.
         --}}
-        <ul class="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            @foreach ($products as $product)
-                <li class="flex">
-                    {{--
-                        Путь к фото загружается через админку и хранится
-                        относительным к публичному диску — «products/<ulid>.jpg»,
-                        поэтому превращается в абсолютный URL публичного диска
-                        через Storage::disk('public')->url(). У всех позиций
-                        поле image пока NULL, и url() не вызывается вовсе: так
-                        на месте фотографии остаётся локальная заглушка.
-                        null превращается в null, а не в «/».
+        @if ($hasProducts)
+            <ul class="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                @foreach ($products as $product)
+                    <li class="flex">
+                        {{--
+                            Путь к фото загружается через админку и хранится
+                            относительным к публичному диску — «products/<ulid>.jpg»,
+                            поэтому превращается в абсолютный URL публичного диска
+                            через Storage::disk('public')->url(). У всех позиций
+                            поле image пока NULL, и url() не вызывается вовсе: так
+                            на месте фотографии остаётся локальная заглушка.
+                            null превращается в null, а не в «/».
 
-                        Характеристики приходят из cardSpecs() модели: сейчас
-                        все значения NULL, и компонент не выводит ни одной
-                        строки. Подтверждённые значения появятся сами.
+                            Характеристики приходят из cardSpecs() модели: сейчас
+                            все значения NULL, и компонент не выводит ни одной
+                            строки. Подтверждённые значения появятся сами.
 
-                        image-alt не передаётся: в таблице products такой
-                        колонки нет, а подставлять выдуманный alt значило бы
-                        описать несуществующую фотографию.
+                            image-alt не передаётся: в таблице products такой
+                            колонки нет, а подставлять выдуманный alt значило бы
+                            описать несуществующую фотографию.
 
-                        details-url не передаётся: страниц отдельных товаров
-                        ещё нет, поэтому кнопка «Подробнее» не выводится и
-                        ссылка на 404 невозможна. Когда страницы появятся,
-                        колонка и одно пропс добавятся здесь.
-                    --}}
-                    <x-product-card
-                        class="w-full"
-                        :name="$product->name"
-                        :image="filled($product->image) ? Illuminate\Support\Facades\Storage::disk('public')->url($product->image) : null"
-                        :short-description="$product->short_description"
-                        :specs="$product->cardSpecs()"
-                        :additional-info="$product->additional_info"
-                    />
-                </li>
-            @endforeach
-        </ul>
+                            details-url не передаётся: страниц отдельных товаров
+                            ещё нет, поэтому кнопка «Подробнее» не выводится и
+                            ссылка на 404 невозможна. Когда страницы появятся,
+                            колонка и одно пропс добавятся здесь.
+                        --}}
+                        <x-product-card
+                            class="w-full"
+                            :name="$product->name"
+                            :image="filled($product->image) ? Illuminate\Support\Facades\Storage::disk('public')->url($product->image) : null"
+                            :short-description="$product->short_description"
+                            :specs="$product->cardSpecs()"
+                            :additional-info="$product->additional_info"
+                        />
+                    </li>
+                @endforeach
+            </ul>
+        @else
+            {{--
+                Активная категория без активных товаров. Не 404: раздел
+                существует и открыт, ассортимент в нём просто пока не
+                выведен. Не «нет в наличии»: фактическое наличие продукции
+                проекту неизвестно, и такое утверждение было бы выдумкой о
+                поставках.
+
+                Оформление повторяет карточку товара — те же скругление,
+                рамка и подложка, — поэтому пустое место читается как
+                содержимое раздела, а не как дыра в вёрстке.
+            --}}
+            <div
+                class="mt-10 rounded-card border border-line bg-canvas p-6 shadow-soft sm:p-8"
+                data-catalog-empty
+            >
+                <p class="max-w-2xl text-body text-ink-muted">{{ $catalogEmptyText }}</p>
+            </div>
+        @endif
 
     </x-section>
 
