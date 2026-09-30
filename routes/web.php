@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\ProductCategoryController;
+use App\Http\Controllers\ProductIndexController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -17,6 +18,12 @@ use Illuminate\Support\Facades\Route;
 | Страницы товаров (/products/eggs/... и подобные) на этом этапе намеренно
 | не создаются, поэтому кнопка «Подробнее» в карточке не выводится и не
 | может увести посетителя на 404.
+|
+| Имена маршрутов разделов (/products, /about, /quality, /contacts)
+| совпадают со значениями 'route' в navigation и footer_navigation
+| (config/site.php), поэтому соответствующие пункты шапки и подвала стали
+| ссылками сами — правки в разметке не потребовались. Пункты, для которых
+| маршрута по-прежнему нет, выводятся неактивными и ведут себя как раньше.
 |
 | Маршруты категорий создаются циклом по config/site.php. Имя маршрута берётся
 | из 'route' того же конфига, поэтому slug в URL, имя маршрута и данные
@@ -34,6 +41,23 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::view('/', 'site.home')->name('home');
+
+/*
+| Обзорная страница продукции. Список категорий строит контроллер: он
+| показывает только те категории из config/site.php, которые активны в базе.
+| Адрес /products объявлен до цикла категорий и не пересекается с ним: цикл
+| регистрирует адреса вида /products/eggs, они длиннее и не конфликтуют.
+*/
+Route::get('/products', [ProductIndexController::class, 'index'])->name('products.index');
+
+/*
+| Текстовые разделы. Данных из базы им не нужно: заголовки, лиды и
+| мета-описания лежат в config/content.php, контакты — в config/site.php.
+| Поэтому это обычные представления без контроллера — так же, как главная.
+*/
+Route::view('/about', 'site.about')->name('about');
+Route::view('/quality', 'site.quality')->name('quality');
+Route::view('/contacts', 'site.contacts')->name('contacts');
 
 foreach ((array) config('site.products', []) as $slug => $product) {
     Route::get('/products/'.$slug, [ProductCategoryController::class, 'show'])
