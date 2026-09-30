@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\ContactMessageController;
 use App\Http\Controllers\ProductCategoryController;
 use App\Http\Controllers\ProductIndexController;
+use App\Http\Controllers\SitemapController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -77,6 +78,21 @@ Route::view('/contacts', 'site.contacts')->name('contacts');
 Route::post('/contacts', [ContactMessageController::class, 'store'])
     ->middleware('throttle:5,1')
     ->name('contacts.store');
+
+/*
+| Карта сайта для поисковых систем: /sitemap.xml.
+|
+| Адрес отдан из маршрута, а не файлом в public/, потому что состав карты
+| зависит от данных: постоянные страницы берутся из навигации
+| config/site.php, а страницы категорий — из активных категорий в базе.
+| Заодно снимается вопрос про домен: адреса собираются из APP_URL, который
+| на сервере и так обязан быть настоящим (см. SitemapController).
+|
+| Файл public/sitemap.xml, если он появится, закроет этот маршрут: статику
+| веб-сервер отдаёт раньше приложения. Карта строится маршрутом именно
+| поэтому, что её нельзя сделать статической без второго источника правды.
+*/
+Route::get('/sitemap.xml', [SitemapController::class, 'index'])->name('sitemap');
 
 foreach ((array) config('site.products', []) as $slug => $product) {
     Route::get('/products/'.$slug, [ProductCategoryController::class, 'show'])
