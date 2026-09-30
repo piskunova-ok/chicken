@@ -1,13 +1,15 @@
 {{--
     СТРАНИЦА «КОНТАКТЫ» — /contacts.
 
-    Первая страница, где контакты собраны в одном месте: телефон, почта,
-    адрес и режим работы. Значения берутся из config/site.php и выводятся
-    ровно так же, как в подвале, — через App\Support\ContactLinks.
+    Контакты собраны в одном месте: телефон, почта, адрес и режим работы.
+    Значения берутся из config/site.php и выводятся ровно так же, как в
+    подвале, — через App\Support\ContactLinks.
 
-    Почему здесь нет формы: форма отправки заявки — отдельный следующий
-    этап. Пока её нет, страница не обещает посетителю способ отправить
-    сообщение: она показывает подтверждённые контакты и направления работы.
+    Рядом с контактами стоит форма обратной связи (x-contact-form). Она
+    проверяет данные на сервере и возвращает посетителя на эту же
+    страницу. Отправки пока нет: письма не формируются, заявка не пишется
+    в базу — это промежуточный технический этап, о котором честно
+    говорит и подпись кнопки, и сообщение после заполнения.
 
     Ничего не выдумано. Пока SITE_PHONE, SITE_EMAIL, SITE_ADDRESS и
     SITE_SCHEDULE не заданы, в конфиге лежат значения-заглушки
@@ -86,40 +88,51 @@
         остаются текстом с data-placeholder. Логика одна и та же для
         подвала, главной и этой страницы, потому что она живёт в
         App\Support\ContactLinks, а не в разметке.
+
+        Раскладка двухколоночная: слева контакты и, если они заданы, адрес
+        с режимом работы, справа форма. Раньше адрес занимал вторую
+        колонку сам, и при незаполненных SITE_ADDRESS и SITE_SCHEDULE
+        колонка просто исчезала; теперь её место занимает форма, которая
+        нужна всегда. Заголовок формы — h2, поэтому на странице остаётся
+        ровно один h1 из hero.
     --}}
     <x-section tone="surface" spacing="default">
-        <div class="grid gap-10 lg:grid-cols-2 lg:gap-16">
+        <div class="grid gap-10 lg:grid-cols-2 lg:items-start lg:gap-16">
             <div>
                 <x-section-heading
                     eyebrow="Как с нами связаться"
                     title="Телефон и почта"
+                    level="h2"
                 />
 
                 <div class="mt-8">
                     <x-contacts />
                 </div>
+
+                @if ($details !== [])
+                    <div class="mt-12">
+                        <x-section-heading
+                            eyebrow="Где мы находимся"
+                            title="Адрес и режим работы"
+                            level="h2"
+                        />
+
+                        <dl class="mt-6 space-y-2 text-body">
+                            @foreach ($details as $detail)
+                                <div class="flex items-baseline justify-between gap-4 border-b border-line pb-4">
+                                    <dt class="text-ink-muted">{{ $detail['label'] }}</dt>
+                                    <dd
+                                        @if (ContactLinks::isPlaceholder($detail['value'])) data-placeholder @endif
+                                        class="text-right font-medium text-ink"
+                                    >{{ $detail['value'] }}</dd>
+                                </div>
+                            @endforeach
+                        </dl>
+                    </div>
+                @endif
             </div>
 
-            @if ($details !== [])
-                <div>
-                    <x-section-heading
-                        eyebrow="Где мы находимся"
-                        title="Адрес и режим работы"
-                    />
-
-                    <dl class="mt-8 space-y-2 text-body">
-                        @foreach ($details as $detail)
-                            <div class="flex items-baseline justify-between gap-4 border-b border-line pb-4">
-                                <dt class="text-ink-muted">{{ $detail['label'] }}</dt>
-                                <dd
-                                    @if (ContactLinks::isPlaceholder($detail['value'])) data-placeholder @endif
-                                    class="text-right font-medium text-ink"
-                                >{{ $detail['value'] }}</dd>
-                            </div>
-                        @endforeach
-                    </dl>
-                </div>
-            @endif
+            <x-contact-form />
         </div>
     </x-section>
 

@@ -1,9 +1,9 @@
 /**
- * Мобильное меню в шапке.
+ * Мобильное меню в шапке и перенос фокуса к результату отправки формы.
  *
- * Работает без фреймворков: кнопка переключает атрибут aria-expanded
- * и атрибут hidden у панели, панель закрывается по Escape, по клику
- * по ссылке и при возврате к десктопной ширине.
+ * Оба блока работают без фреймворков. Меню переключает атрибут
+ * aria-expanded и атрибут hidden у панели, панель закрывается по Escape,
+ * по клику по ссылке и при возврате к десктопной ширине.
  */
 const initMobileMenu = () => {
     const toggle = document.querySelector('[data-menu-toggle]');
@@ -58,8 +58,33 @@ const initMobileMenu = () => {
     });
 };
 
+/**
+ * Перенос фокуса к результату отправки формы.
+ *
+ * После отправки форма показывает либо сообщение об успехе, либо сводку
+ * ошибок. Обе они приходят вместе с новой загрузкой страницы, поэтому
+ * экранный диктор такую live-область обычно не озвучивает. Перенос фокуса
+ * на неё работает всегда, и клавиатура сразу оказывается у результата.
+ *
+ * Разметка с data-form-result появляется только после отправки, так что
+ * на обычном открытии страницы фокус никто не перехватывает.
+ */
+const initFormResultFocus = () => {
+    const result = document.querySelector('[data-form-result]');
+
+    if (!(result instanceof HTMLElement) || !result.hasAttribute('tabindex')) {
+        return;
+    }
+
+    result.focus();
+};
+
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initMobileMenu);
+    document.addEventListener('DOMContentLoaded', () => {
+        initMobileMenu();
+        initFormResultFocus();
+    });
 } else {
     initMobileMenu();
+    initFormResultFocus();
 }

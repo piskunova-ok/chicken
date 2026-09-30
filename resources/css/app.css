@@ -33,6 +33,14 @@
     --color-line: #ded7c8;
     --color-line-strong: #c8bfae;
 
+    /* ---------- Сообщения об ошибке ----------
+       Отдельный цвет, а не brand-коричневый --color-accent: у сообщения
+       «поле заполнено неверно» должна быть собственная выразительная
+       маркировка, иначе посетитель прочитает её как обычную подпись.
+       Контраст #a0321f к поверхности #faf8f2 — 6.6:1 (AA для обычного
+       текста, 4.5:1). */
+    --color-danger: #a0321f;
+
     /* ---------- Шрифты ---------- */
     --font-sans: 'Manrope Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
     --font-hand: 'Caveat', 'Segoe Script', cursive;

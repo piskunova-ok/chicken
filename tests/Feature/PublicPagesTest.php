@@ -363,15 +363,22 @@ final class PublicPagesTest extends TestCase
         $response->assertSee('Пн–Пт, 9:00–18:00');
     }
 
-    public function test_no_page_promises_a_form_that_does_not_exist(): void
+    public function test_the_contacts_page_shows_a_real_form_instead_of_pretending_to_one(): void
     {
-        // Форма отправки заявки — следующий этап. Пока её нет, страница
-        // контактов не должна содержать даже намёка на отправку: обещание,
-        // которое страница не сдерживает, хуже отсутствия кнопки.
-        $response = $this->get('/contacts')->assertOk();
+        // Раньше здесь стоял обратный тест — test_no_page_promises_a_form_
+        // that_does_not_exist: он требовал, чтобы на странице вообще не
+        // было <form>, потому что формы ещё не существовало. Форма
+        // появилась (этап обратной связи), и требование сменилось на
+        // противоположное: раз страница показывает форму, она обязана
+        // отправляться по настоящему адресу, а не быть декорацией.
+        $html = $this->get('/contacts')->assertOk()->getContent();
 
-        $this->assertStringNotContainsString('<form', $response->getContent());
-        $this->assertStringNotContainsString('wire:submit', $response->getContent());
+        $this->assertStringContainsString('<form', $html);
+        $this->assertStringContainsString('action="'.route('contacts.store').'"', $html);
+
+        // При этом форма обычная, без Livewire: публичный сайт не тянет
+        // клиентский JS, и обещать интерактивную отправку было бы враньём.
+        $this->assertStringNotContainsString('wire:submit', $html);
     }
 
     // ------------------------------------------------------------------
