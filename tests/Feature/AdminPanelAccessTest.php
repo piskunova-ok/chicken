@@ -86,6 +86,53 @@ class AdminPanelAccessTest extends TestCase
         $this->get('/admin/login')->assertOk();
     }
 
+    public function test_the_login_page_title_does_not_mention_laravel(): void
+    {
+        // Filament собирает <title> как «заголовок страницы - brandName», а
+        // brandName по умолчанию берётся из config('app.name'), то есть из
+        // APP_NAME. Пока в APP_NAME не задано реальное название, на служебной
+        // странице входа выводилось «Авторизоваться - Laravel».
+        $title = $this->titleOf($this->get('/admin/login'));
+
+        $this->assertNotSame('', $title);
+        $this->assertStringNotContainsStringIgnoringCase('Laravel', $title);
+    }
+
+    public function test_the_login_page_is_branded_with_a_neutral_interface_name(): void
+    {
+        // Название компании заказчик ещё не передал, и выдумывать его нельзя,
+        // поэтому бренд панели нейтральный и не зависит от данных заказчика:
+        // тест не сломается после подстановки SITE_NAME.
+        $this->get('/admin/login')
+            ->assertOk()
+            ->assertSee('Панель управления');
+    }
+
+    public function test_the_login_page_still_renders_its_form(): void
+    {
+        // Смена бренда не должна была сломать саму страницу. Проверяются
+        // структурные признаки полей Livewire, а не оформление Filament:
+        // разметка вёрстки меняется от версии к версии, а форма входа
+        // обязана остаться.
+        $this->get('/admin/login')
+            ->assertOk()
+            ->assertSee('wire:model="data.email"', escape: false)
+            ->assertSee('wire:model="data.password"', escape: false)
+            ->assertSee('wire:submit', escape: false);
+    }
+
+    /**
+     * Достать текст <title> из ответа.
+     */
+    private function titleOf($response): string
+    {
+        $html = (string) $response->getContent();
+
+        return preg_match('~<title[^>]*>(.*?)</title>~is', $html, $m)
+            ? trim(preg_replace('/\s+/u', ' ', $m[1]))
+            : '';
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Авторизованный пользователь

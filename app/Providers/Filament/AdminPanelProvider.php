@@ -27,6 +27,17 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('admin')
+            // Filament собирает <title> каждой страницы панели как
+            // «заголовок страницы - brandName», а brandName по умолчанию
+            // берётся из config('app.name') — то есть из APP_NAME. Пока в
+            // APP_NAME не задано реальное название, в <title> страницы входа
+            // выводилось «Авторизоваться - Laravel», и слово Laravel попадало
+            // на служебную страницу, которую видит заказчик при проверке.
+            // Подменяем бренд нейтральным названием интерфейса: как только
+            // заказчик передаст SITE_NAME, brandName можно переключить на
+            // config('site.name') — вручную копировать vendor-шаблоны для
+            // этого не требуется.
+            ->brandName('Панель управления')
             ->login()
             ->colors([
                 'primary' => Color::Amber,
