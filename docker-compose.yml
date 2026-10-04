@@ -1,0 +1,69 @@
+# ТОЛЬКО ДЛЯ ЛОКАЛЬНОГО ПРОВЕРОЧНОГО ПРОГОНА.
+#
+# Render этот файл не использует. У Render один Web Service — один
+# контейнер из Dockerfile; отдельный контейнер с nginx Render не
+# развернёт как самостоятельный сервис. Настройка на Render делается
+# через переменные окружения в панели.
+#
+# Здесь compose поднимает рядом PostgreSQL, потому что рабочую
+# database.sqlite использовать для проверки нельзя: она содержит
+# пользовательские данные и должна остаться нетронутой.
+#
+# Запуск:
+#   docker compose up -d --build
+#   docker compose exec app php artisan migrate --force
+#   docker compose exec app php artisan db:seed --class=ProductCatalogSeeder --force
+#   Invoke-WebRequest http://localhost:8126/products/eggs
+#
+# Миграции и сидер запускаются вручную именно потому, что entrypoint их
+# не выполняет: в контейнере на Render это отдельные шаги деплоя.
+
+services:
+  app:
+    build:
+      context: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_URL: http://localhost:8126
+      # Значение только для локальной проверки, на Render задаётся в панели.
+      # Декодируется ровно в 32 байта: cipher AES-256-CBC из config/app.php
+      # отвергает ключ другой длины. Случайную строку меньшей длины ставить
+      # нельзя — контейнер поднимется, но каждый запрос будет давать 500.
+      APP_KEY: "base64:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+      PORT: "8126"
+      LOG_CHANNEL: stderr
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_DATABASE: chicken
+      DB_USERNAME: chicken
+      DB_PASSWORD: chicken
+      # Сессии и кэш в файлах: не требуют дополнительных таблиц и не
+      # мешают проверке каталога. На Render останутся значения по
+      # умолчанию из config/ — их нужно задать осознанно.
+      SESSION_DRIVER: file
+      CACHE_STORE: file
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+    ports:
+      - "8126:8126"
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: chicken
+      POSTGRES_USER: chicken
+      POSTGRES_PASSWORD: chicken
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chicken -d chicken"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Данные не сохраняются между прогонами: проверка каждый раз
+    # начинается с чистой базы, а каталог наполняется сидером.
+    tmpfs:
+      - /var/lib/postgresql/data

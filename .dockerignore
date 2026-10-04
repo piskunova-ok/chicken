@@ -1,0 +1,58 @@
+# Контекст сборки не должен содержать ничего, что не нужно в итоговом
+# образе, и — главное — ничего локального и секретного.
+
+# Git и локальное окружение.
+# .gitignore здесь НЕ исключается: он копируется в assets-стадию, потому
+# что Tailwind 4 определяет источники классов автоопределением и должен
+# знать, что игнорировать. Исключение сделало бы COPY .gitignore в
+# Dockerfile неработающим.
+.git
+.gitattributes
+.env
+.env.*
+.env.backup
+.env.production
+
+# Зависимости ставятся и собираются внутри образа
+vendor
+node_modules
+
+# Рабочая база. Миграции и сидеры из database/ нужны, но сама SQLite —
+# нет: на Render используется PostgreSQL, и файл рабочей базы не должен
+# ни попасть в образ, ни быть перезаписан.
+database/*.sqlite
+database/*.sqlite-journal
+database/*.sqlite-wal
+database/*.sqlite-shm
+database/*.db
+
+# Собранные и опубликованные ассеты: и приходят из build-стадии
+public/build
+public/hot
+public/storage
+public/js/filament
+public/css/filament
+public/fonts/filament
+
+# Рантайм-мусор, который не должен попасть в образ
+storage/logs/*
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/framework/testing/*
+
+# Скомпилированный список пакетов из локальных запусков artisan.
+# В образе он пересоздаётся на этапе сборки командой package:discover,
+# поэтому копировать локальный не нужно.
+bootstrap/cache/*.php
+
+# Тесты в production-образе не нужны
+tests
+phpunit.xml
+.phpunit.result.cache
+.phpunit.cache
+.php-cs-fixer.cache
+
+# Служебное
+docker-compose.yml
+README.md

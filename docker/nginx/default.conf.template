@@ -1,0 +1,119 @@
+# Шаблон конфига nginx. Используется ТОЛЬКО через envsubst '${PORT}'.
+#
+# Ограничение '${PORT}' принципиально. В этом файле есть собственные
+# переменные nginx — $uri, $document_root, $fastcgi_script_name,
+# $query_string. Если вызвать envsubst без списка переменных, он подставит
+# и их тоже, и конфиг перестанет парситься. Список переменных в entrypoint
+# передаётся явно, поэтому подменяется ровно одна — PORT.
+#
+# Render задаёт PORT переменной окружения (по умолчанию 10000), поэтому
+# порт нельзя зашивать в конфиг: единственный публичный порт Web Service
+# выбирается Render'ом.
+
+server {
+    # 0.0.0.0 обязателен: процесс слушает все интерфейсы контейнера,
+    # иначе Render не достучится снаружи.
+    listen 0.0.0.0:${PORT} default_server;
+
+    # Заголовок Host у Render произвольный, поэтому имя сервера
+    # не участвует в выборе виртуального хоста.
+    server_name _;
+
+    # Точка входа Laravel — public/, а не корень проекта: иначе исходники
+    # и .env были бы доступны извне.
+    root /var/www/html/public;
+    index index.php;
+
+    charset utf-8;
+    client_max_body_size 8M;
+
+    # Заголовки безопасности. Внутри location^~ /{add_header} наследуется
+    # по правилам nginx: любой add_header в location сбрасывает унаследованные
+    # от server. Поэтому в этих location используется expires, который
+    # Cache-Control задаёт сам и наследование не ломает.
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Подавляет публикацию версии nginx.
+    server_tokens off;
+
+    # Фронтенд и фотографии каталога — статика, PHP в них не участвует.
+    # ^~ важно: он отдаёт эти префиксы минуя location ~ /\.php$ и любые
+    # другие regex-правила.
+    location ^~ /build/ {
+        try_files $uri =404;
+        expires 1y;
+        access_log off;
+    }
+
+    location ^~ /images/ {
+        try_files $uri =404;
+        expires 30d;
+        access_log off;
+    }
+
+    # Сюда попадают старые пути products/<ulid>, которые Product::imageUrl()
+    # отдаёт через Storage::disk('public')->url(). В образе каталог пуст,
+    # поэтому try_files честно вернёт 404, а не уведёт запрос в Laravel.
+    location ^~ /storage/ {
+        try_files $uri =404;
+        expires 7d;
+        access_log off;
+    }
+
+    # Точка входа Laravel.
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location = /favicon.ico { access_log off; log_not_found off; }
+    location = /robots.txt  { access_log off; log_not_found off; }
+
+    location ~ \.php$ {
+        try_files $uri =404;
+
+        include fastcgi_params;
+
+        # В дистрибутиве Debian fastcgi_params передаёт HTTP_HOST как $host,
+        # а nginx в $host отбрасывает порт. Laravel строит по HTTP_HOST
+        # корень сайта, поэтому из $host получалось http://localhost вместо
+        # http://localhost:8126 — и все абсолютные URL теряли порт.
+        # $http_host — это исходный заголовок Host клиента, вместе с
+        # портом, если клиент его прислал. Объявление идёт после include,
+        # поэтому перекрывает значение из fastcgi_params.
+        fastcgi_param HTTP_HOST $http_host;
+
+        # php-fpm в этом же контейнере, на стандартном TCP-сокете
+        # 127.0.0.1:9000 из php.ini. Unix-сокет здесь не нужен: контейнер
+        # один, сетевой стек уже есть, а права на сокет добавили бы
+        # ещё одну вещь, которая может сломаться.
+        fastcgi_pass 127.0.0.1:9000;
+        fastcgi_index index.php;
+
+        # $document_root = /var/www/html/public, поэтому путь собирается
+        # /var/www/html/public/index.php, а не путь внутри проекта.
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param DOCUMENT_ROOT $document_root;
+
+        # Значения timeout не меньше max_execution_time из php.ini,
+        # иначе долгий ответ будет обрезан на стороне nginx.
+        fastcgi_read_timeout 60;
+        fastcgi_send_timeout 60;
+
+        fastcgi_buffer_size 32k;
+        fastcgi_buffers 16 16k;
+        fastcgi_busy_buffers_size 64k;
+    }
+
+    # Служебные файлы и каталоги наружу не выдаются. Исключение для
+    # .well-known — там лежат ACME-челленджи, если их поставит хостинг.
+    #
+    # Отдельного правила на *.env / *.log / *.sql здесь нет сознательно:
+    # document root — public/, поэтому таких файлов в нём просто нет, а
+    # regex по расширениям рано или поздно заблокировал бы нужный ассет
+    # (например, manifest.json внутри /build/).
+    location ~ /\.(?!well-known).* {
+        deny all;
+    }
+}
