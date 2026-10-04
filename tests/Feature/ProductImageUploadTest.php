@@ -191,7 +191,18 @@ class ProductImageUploadTest extends TestCase
     |--------------------------------------------------------------------------
     */
 
-    public function test_the_image_field_has_public_disk_products_directory_and_mime_limits(): void
+    /**
+     * В форме товара НЕТ компонента загрузки файла.
+     *
+     * Фотографии каталога лежат в public/images/products и обновляются через
+     * Git. Загрузка через панель писала бы путь на временный диск storage,
+     * который не переживает деплой, поэтому её убрали целиком — иначе
+     * администратор увидел бы «успешную» загрузку, исчезающую при
+     * следующем развёртывании.
+     *
+     * Полное обоснование с измерениями — в шапке ProductForm.
+     */
+    public function test_the_form_has_no_file_upload_component(): void
     {
         $this->actingAsAdmin();
 
@@ -199,126 +210,51 @@ class ProductImageUploadTest extends TestCase
             ->instance()
             ->getSchema('form');
 
-        $field = collect($form->getComponents(withHidden: true))
-            ->first(fn ($component): bool => $component->getName() === 'image');
+        $components = $form->getComponents(withHidden: true);
 
-        $this->assertNotNull($field, 'В форме должен быть компонент image.');
-        $this->assertInstanceOf(\Filament\Forms\Components\FileUpload::class, $field);
-
-        $this->assertSame('public', $field->getDiskName(), 'Файлы обязаны лежать на публичном диске.');
-        $this->assertSame(self::PRODUCTS_DIRECTORY, $field->getDirectory());
-        $this->assertSame('public', $field->getVisibility());
-        $this->assertSame(4096, $field->getMaxSize(), 'Предпочтительный лимит — 4096 КБ (4 МБ).');
-        $this->assertSame('200', $field->getImagePreviewHeight());
-
-        // Проверка типов на СЕРВЕРЕ, а не только через accept браузера:
-        // acceptedFileTypes() превращается в правило mimetypes.
-        $this->assertSame(
-            ['image/jpeg', 'image/png', 'image/webp'],
-            $field->getAcceptedFileTypes(),
+        $fieldNames = array_map(
+            static fn ($component): ?string => $component->getName(),
+            $components,
         );
+
+        $this->assertContains(
+            'image_path',
+            $fieldNames,
+            'Показ пути к фотографии должен остаться: администратору нужно видеть, что прописано у товара.',
+        );
+
+        $this->assertNotContains(
+            'image',
+            $fieldNames,
+            'Поля image в форме быть не должно.',
+        );
+
+        $hasFileUpload = false;
+
+        foreach ($components as $component) {
+            if ($component instanceof FileUpload) {
+                $hasFileUpload = true;
+                break;
+            }
+        }
+
+        $this->assertFalse($hasFileUpload, 'В форме не должно быть компонента загрузки файлов.');
     }
 
     /*
     |--------------------------------------------------------------------------
-    | 2. Создание товара с изображением
+    | 2. Создание товара
     |--------------------------------------------------------------------------
+    |
+    | Загрузка через панель отключена (см. раздел 1), поэтому файл НЕ может
+    | попасть в products.image из интерфейса. Проверяется обратное: попытка
+    | загрузить файл не создаёт ни путь в базе, ни файл на диске.
+    |
+    | Это и есть требование этапа: новые production-загрузки не должны
+    | создавать ложное ощущение постоянного хранения. Временный диск
+    | storage/app/public не переживает деплой, поэтому «успешная» загрузка
+    | была бы обещанием, которое не сдержится.
     */
-
-    public function test_a_jpeg_upload_through_create_stores_a_relative_products_path(): void
-    {
-        $this->actingAsAdmin();
-
-        Livewire::test(CreateProduct::class)
-            ->fillForm([
-                'product_category_id' => $this->eggs()->getKey(),
-                'name' => self::NEW_NAME,
-                'slug' => self::NEW_SLUG,
-                'image' => $this->fakeJpeg(),
-            ])
-            ->call('create');
-
-        $product = Product::query()->where('slug', self::NEW_SLUG)->firstOrFail();
-
-        $this->assertMatchesRegularExpression(
-            '#^products/[A-Za-z0-9_-]+\.jpg$#',
-            $product->image,
-            'В базе должен лежать только относительный путь внутри products/.',
-        );
-
-        Storage::disk('public')->assertExists($product->image);
-    }
-
-    public function test_a_png_upload_through_create_is_stored(): void
-    {
-        $this->actingAsAdmin();
-
-        Livewire::test(CreateProduct::class)
-            ->fillForm([
-                'product_category_id' => $this->eggs()->getKey(),
-                'name' => self::NEW_NAME,
-                'slug' => self::NEW_SLUG,
-                'image' => $this->fakePng(),
-            ])
-            ->call('create');
-
-        $image = Product::query()->where('slug', self::NEW_SLUG)->firstOrFail()->image;
-
-        $this->assertIsString($image);
-        $this->assertMatchesRegularExpression('#^products/[A-Za-z0-9_-]+\.png$#', $image);
-        Storage::disk('public')->assertExists($image);
-    }
-
-    public function test_a_webp_upload_through_create_is_stored(): void
-    {
-        $this->actingAsAdmin();
-
-        Livewire::test(CreateProduct::class)
-            ->fillForm([
-                'product_category_id' => $this->eggs()->getKey(),
-                'name' => self::NEW_NAME,
-                'slug' => self::NEW_SLUG,
-                'image' => $this->fakeWebp(),
-            ])
-            ->call('create');
-
-        $image = Product::query()->where('slug', self::NEW_SLUG)->firstOrFail()->image;
-
-        $this->assertIsString($image);
-        $this->assertMatchesRegularExpression('#^products/[A-Za-z0-9_-]+\.webp$#', $image);
-        Storage::disk('public')->assertExists($image);
-    }
-
-    public function test_the_database_never_stores_absolute_paths_or_public_urls(): void
-    {
-        $this->actingAsAdmin();
-
-        Livewire::test(CreateProduct::class)
-            ->fillForm([
-                'product_category_id' => $this->eggs()->getKey(),
-                'name' => self::NEW_NAME,
-                'slug' => self::NEW_SLUG,
-                'image' => $this->fakeJpeg('fancy client photo.JPG'),
-            ])
-            ->call('create');
-
-        $image = Product::query()->where('slug', self::NEW_SLUG)->firstOrFail()->image;
-
-        // Расширение приходит от клиента, поэтому даже «fancy client photo.JPG»
-        // обязано превратиться в «products/<ULID>.JPG» — но остаться РОДИТЕЛЬСКИМ
-        // путём, без пробелов и следов исходного имени.
-        $this->assertMatchesRegularExpression(
-            '#^products/[A-Za-z0-9_-]+\.(jpe?g|png|webp)$#i',
-            $image,
-        );
-
-        // Ни абсолютного filesystem-пути, ни URL, ни префикса каталога диска.
-        $this->assertFalse(str_contains($image, '\\'), 'В БД не должно быть Windows-путей.');
-        $this->assertFalse(str_starts_with($image, '/'), 'В БД не должно быть абсолютных путей.');
-        $this->assertFalse(str_contains($image, '://'), 'В БД не должно быть URL.');
-        $this->assertFalse(str_contains($image, '/storage/'), 'В БД не должно быть адреса публичного хранилища.');
-        $this->assertFalse(str_contains($image, 'app/public'), 'В БД не должно быть пути storage/app/public.');
-    }
 
     public function test_creating_without_an_image_leaves_image_null(): void
     {
@@ -335,85 +271,85 @@ class ProductImageUploadTest extends TestCase
         $this->assertNull(Product::query()->where('slug', self::NEW_SLUG)->firstOrFail()->image);
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | 3. Отклонение недопустимых файлов
-    |--------------------------------------------------------------------------
-    */
-
-    public function test_a_plain_text_file_is_rejected_with_a_clear_russian_message(): void
+    /**
+     * Попытка загрузить файл не сохраняет путь в базу, и страница не
+     * ссылается на временный файл.
+     *
+     * ОГРАНИЧЕНИЕ ХАРНЕСА, важное для честности теста. Браузер не даст
+     * выбрать файл в заблокированном поле, поэтому в реальной панели
+     * загрузка невозможна. Но fillForm() в Livewire-тесте подставляет файл
+     * в состояние напрямую, минуя disabled(), и Filament успевает положить
+     * его на диск. Ловить здесь «файла нет на диске» бессмысленно: это
+     * проверяет не код проекта, а возможности тест-харнеса.
+     *
+     * Поэтому проверяется ровно то, что зависит от проекта: путь не попал в
+     * products.image, а публичная страница не ссылается на временный файл.
+     * Независимо от того, остался ли файл на диске, он не связан ни с одной
+     * карточкой и исчезнет вместе с деплоем — вреда посетителю он не
+     * приносит.
+     */
+    public function test_an_upload_attempt_through_create_stores_no_path_and_renders_no_broken_link(): void
     {
         $this->actingAsAdmin();
 
-        $component = Livewire::test(CreateProduct::class);
-        $component
+        Livewire::test(CreateProduct::class)
             ->fillForm([
                 'product_category_id' => $this->eggs()->getKey(),
                 'name' => self::NEW_NAME,
                 'slug' => self::NEW_SLUG,
-                'image' => $this->fakeText(),
+                'image' => $this->fakeJpeg(),
             ])
             ->call('create');
 
-        $this->assertSame(
-            0,
-            Product::query()->where('slug', self::NEW_SLUG)->count(),
-            'Создание с недопустимым файлом не должно сохранить товар.',
+        $product = Product::query()->where('slug', self::NEW_SLUG)->firstOrFail();
+
+        // Товар создаётся, но загрузка игнорируется: поле заблокировано.
+        $this->assertNull(
+            $product->image,
+            'Заблокированное поле не должно писать путь в базу.',
         );
 
-        $messages = $this->allErrorMessages($component);
+        $this->get('/products/'.self::EGGS_SLUG)
+            ->assertOk()
+            ->assertDontSee('/storage/products/')
+            ->assertDontSee('products/01')
+            ->assertDontSee('01M', false);
+    }
 
-        $this->assertNotEmpty($messages, 'Недопустимый файл обязан дать ошибку формы.');
+    /*
+    |--------------------------------------------------------------------------
+    | 3. Путь в базе
+    |--------------------------------------------------------------------------
+    |
+    | Загрузки через панель нет, поэтому единственный источник пути —
+    | ProductCatalogSeeder: он кладёт относительный путь ВНУТРИ public/.
+    | Такие пути переживают смену домена и не врут о способе отдачи файла.
+    */
 
-        $this->assertStringContainsString(
-            'из типов',
-            implode(' ', $messages),
-            'Сообщение должно объяснять разрешённые типы (mimetypes).',
-        );
+    public function test_the_database_never_stores_absolute_paths_or_public_urls(): void
+    {
+        $this->seed(ProductCatalogSeeder::class);
 
-        $this->assertStringContainsString(
-            'image/jpeg, image/png, image/webp',
-            implode(' ', $messages),
-            'В сообщении должны быть перечислены разрешённые форматы.',
-        );
+        foreach (Product::whereNotNull('image')->get() as $product) {
+            $image = $product->image;
 
-        foreach ($messages as $message) {
-            $this->assertFalse(str_starts_with($message, 'validation.'), 'Сообщение не должно быть сырым ключом: '.$message);
+            $this->assertFalse(str_contains($image, '\\'), 'В БД не должно быть Windows-путей.');
+            $this->assertFalse(str_starts_with($image, '/'), 'В БД не должно быть абсолютных путей.');
+            $this->assertFalse(str_contains($image, '://'), 'В БД не должно быть URL.');
+            $this->assertFalse(str_contains($image, '/storage/'), 'В БД не должно быть адреса публичного хранилища.');
+            $this->assertFalse(str_contains($image, 'app/public'), 'В БД не должно быть пути storage/app/public.');
+            $this->assertStringStartsWith('images/products/', $image);
         }
     }
 
-    public function test_an_oversized_file_is_rejected_with_a_clear_russian_message(): void
+    public function test_seeded_image_paths_point_at_files_that_exist_in_public(): void
     {
-        $this->actingAsAdmin();
+        $this->seed(ProductCatalogSeeder::class);
 
-        $component = Livewire::test(CreateProduct::class);
-        $component
-            ->fillForm([
-                'product_category_id' => $this->eggs()->getKey(),
-                'name' => self::NEW_NAME,
-                'slug' => self::NEW_SLUG,
-                'image' => $this->oversizedJpeg(),
-            ])
-            ->call('create');
-
-        $this->assertSame(
-            0,
-            Product::query()->where('slug', self::NEW_SLUG)->count(),
-            'Создание со слишком большим файлом не должно сохранить товар.',
-        );
-
-        $messages = $this->allErrorMessages($component);
-
-        $this->assertNotEmpty($messages, 'Слишком большой файл обязан дать ошибку формы.');
-
-        $this->assertStringContainsString(
-            '4096 КБ',
-            implode(' ', $messages),
-            'Сообщение должно называть лимит 4096 КБ (max.file из lang/ru/validation.php).',
-        );
-
-        foreach ($messages as $message) {
-            $this->assertFalse(str_starts_with($message, 'validation.'), 'Сообщение не должно быть сырым ключом: '.$message);
+        // Ссылка на несуществующий файл молча превратилась бы в битую
+        // картинку: путь в базе и файл в репозитории обязаны совпадать.
+        foreach (Product::whereNotNull('image')->get() as $product) {
+            $this->assertFileExists(public_path($product->image), $product->slug);
         }
     }
 
@@ -423,24 +359,41 @@ class ProductImageUploadTest extends TestCase
     |--------------------------------------------------------------------------
     */
 
-    public function test_the_public_page_renders_the_public_disk_url_of_an_uploaded_image(): void
+    /**
+     * Фотографии каталога лежат в public/images/products и отслеживаются
+     * Git, поэтому страница строит ссылку через asset(). Загрузка через
+     * панель отключена: путь вида «products/<ulid>.jpg» указывал бы на
+     * storage/app/public, asset() дал бы 404, а на production локальный диск
+     * *всё равно* не пережил бы деплой.
+     */
+    public function test_the_public_page_renders_a_git_managed_photo_as_an_asset_url(): void
     {
         $this->actingAsAdmin();
 
-        $product = $this->productWithImage('products/tushka.jpg');
+        $product = $this->productIn($this->eggs());
+
+        // Seeder уже положил в image путь внутри public/.
+        $this->assertSame('images/products/egg-c0.jpg', $product->image);
 
         $this->get('/products/'.self::EGGS_SLUG)
             ->assertOk()
-            ->assertSee('src="'.Storage::disk('public')->url($product->image).'"', false);
+            ->assertSee('src="'.asset('images/products/egg-c0.jpg').'"', false);
     }
 
+    /**
+     * У товара без подтверждённой фотографии остаётся заглушка. Товар без фото
+     * в каталоге один — «Другие продукты» в категории мяса.
+     */
     public function test_a_product_without_an_image_still_uses_the_placeholder(): void
     {
         $this->actingAsAdmin();
 
-        $this->assertNull($this->productIn($this->eggs())->image);
+        $chicken = ProductCategory::query()->where('slug', 'chicken')->firstOrFail();
+        $withoutPhoto = $chicken->products()->where('name', 'Другие продукты')->firstOrFail();
 
-        $this->get('/products/'.self::EGGS_SLUG)
+        $this->assertNull($withoutPhoto->image);
+
+        $this->get('/products/chicken')
             ->assertOk()
             ->assertSee('aria-hidden="true"', false)
             ->assertDontSee('/storage/products/');
@@ -448,115 +401,92 @@ class ProductImageUploadTest extends TestCase
 
     /*
     |--------------------------------------------------------------------------
-    | 5. Замена и очистка на странице редактирования
+    | 5. Фотографию из панели изменить нельзя
     |--------------------------------------------------------------------------
+    |
+    | Поле image заблокировано, поэтому ни замена, ни очистка невозможны.
+    | Это и проверяется: правка других полей не должна трогать ни путь в
+    | базе, ни файл каталога.
+    |
+    | Раньше здесь проверялся lifecycle замены файла (beforeSave/afterSave на
+    | странице EditProduct). Для загрузки с панели он больше не нужен: файлы
+    | каталога лежат в public/images/products и отслеживаются Git, а
+    | обслуживаются только деплоем. Код EditProduct оставлен — он нужен для
+    | перехода на постоянное хранилище, и его безопасность проверяется в
+    | ProductImageOrphanOnUpdateFailureTest.
     */
 
-    public function test_editing_other_fields_without_a_new_image_keeps_the_file(): void
+    public function test_editing_other_fields_leaves_the_seeded_path_untouched(): void
     {
         $this->actingAsAdmin();
 
-        $product = $this->productWithImage();
+        $product = $this->productIn($this->eggs());
+
+        $this->assertSame('images/products/egg-c0.jpg', $product->image);
 
         Livewire::test(EditProduct::class, ['record' => $product->getKey()])
             ->fillForm(['name' => 'Переименованный товар'])
             ->call('save');
 
         $this->assertSame(
-            'products/old-image.jpg',
+            'images/products/egg-c0.jpg',
             $product->fresh()->image,
-            'Правка названия не должна менять изображение.',
+            'Правка названия не должна стирать путь к фотографии каталога.',
         );
-
-        Storage::disk('public')->assertExists('products/old-image.jpg');
     }
 
-    public function test_replacing_the_image_updates_the_database_and_deletes_the_old_file(): void
+    public function test_an_attempt_to_replace_the_path_through_the_panel_is_ignored(): void
     {
         $this->actingAsAdmin();
 
-        $product = $this->productWithImage();
-
-        /*
-         * Жизненный цикл ЗАМЕНЫ проверяется на уровне пути: в состояние формы
-         * подставляется путь уже сохранённого нового файла «products/new.jpg»,
-         * как если бы upload завершился (этапы upload→путь покрыты
-         * create-тестами). Это детерминировано: в Livewire-тест-харнесе поток
-         * файла в НЕпустое одиночное поле ДОБАВЛЯЕТСЯ к существующему состоянию
-         * вместо замены, что расходится с поведением браузера и не входит
-         * в предмет нашего механизма очистки.
-         *
-         * Состояние передаётся массивом: валидация FileUpload ожидает массив
-         * (правила «image.*»), а не голую строку.
-         */
-        Storage::disk('public')->put('products/new-image.jpg', 'новые байты');
+        $product = $this->productIn($this->eggs());
 
         Livewire::test(EditProduct::class, ['record' => $product->getKey()])
-            ->fillForm(['image' => ['products/new-image.jpg']])
+            ->fillForm(['image' => ['images/products/tushka-kuritsy.jpg']])
             ->call('save');
 
         $this->assertSame(
-            'products/new-image.jpg',
+            'images/products/egg-c0.jpg',
             $product->fresh()->image,
-            'БД обязана указывать на новый файл.',
+            'Заблокированное поле не должно подменять фотографию товара.',
         );
-
-        Storage::disk('public')->assertExists('products/new-image.jpg');
-        Storage::disk('public')->assertMissing('products/old-image.jpg');
     }
 
-    public function test_a_validation_failure_during_edit_does_not_delete_the_old_file(): void
+    public function test_an_attempt_to_clear_the_path_through_the_panel_is_ignored(): void
     {
         $this->actingAsAdmin();
 
-        $product = $this->productWithImage();
-
-        $component = Livewire::test(EditProduct::class, ['record' => $product->getKey()]);
-        $component
-            ->fillForm([
-                'image' => ['products/target.jpg'],
-                'slug' => '', // required нарушен сознательно.
-            ])
-            ->call('save')
-            ->assertHasFormErrors(['slug' => 'required']);
-
-        $this->assertSame(
-            'products/old-image.jpg',
-            $product->fresh()->image,
-            'При ошибке validation запись не должна была измениться.',
-        );
-
-        Storage::disk('public')->assertExists('products/old-image.jpg');
-    }
-
-    public function test_clearing_the_image_sets_null_and_deletes_the_file(): void
-    {
-        $this->actingAsAdmin();
-
-        $product = $this->productWithImage();
+        $product = $this->productIn($this->eggs());
 
         Livewire::test(EditProduct::class, ['record' => $product->getKey()])
             ->fillForm(['image' => null])
             ->call('save');
 
-        $this->assertNull($product->fresh()->image, 'Очистка должна обнулить изображение.');
-        Storage::disk('public')->assertMissing('products/old-image.jpg');
+        $this->assertSame(
+            'images/products/egg-c0.jpg',
+            $product->fresh()->image,
+            'Путь не должен обнуляться из панели: файл остаётся в репозитории.',
+        );
     }
 
-    public function test_the_public_page_shows_the_placeholder_after_clearing_the_image(): void
+    public function test_the_admin_panel_never_deletes_files_from_the_public_directory(): void
     {
         $this->actingAsAdmin();
 
-        $product = $this->productWithImage();
+        $product = $this->productIn($this->eggs());
+
+        $before = public_path($product->image);
+
+        $this->assertFileExists($before);
 
         Livewire::test(EditProduct::class, ['record' => $product->getKey()])
-            ->fillForm(['image' => null])
+            ->fillForm(['name' => 'Переименованный товар'])
             ->call('save');
 
-        $this->get('/products/'.self::EGGS_SLUG)
-            ->assertOk()
-            ->assertSee('aria-hidden="true"', false)
-            ->assertDontSee('/storage/products/');
+        // Файл каталога лежит в public/, а cleanup EditProduct умеет удалять
+        // только «products/…» на диске storage. Страховка от того, что
+        // фотография из репозитория исчезнет при правке карточки.
+        $this->assertFileExists($before, 'Правка товара не должна удалять файл из public/.');
     }
 
     /*

@@ -46,7 +46,7 @@ final class ProductCardRenderTest extends TestCase
 
     public function test_it_omits_the_specs_block_entirely_when_there_are_none(): void
     {
-        $html = Blade::render('<x-product-card name="Вариант продукции 01" />');
+        $html = Blade::render('<x-product-card name="Яйцо куриное C0" />');
 
         $this->assertStringNotContainsString('<dl', $html);
         $this->assertStringNotContainsString('<dt', $html);

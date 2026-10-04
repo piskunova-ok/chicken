@@ -7,6 +7,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Товар каталога.
@@ -82,6 +83,62 @@ class Product extends Model
             'shelf_life' => $this->shelf_life,
             'storage' => $this->storage,
         ];
+    }
+
+    /**
+     * Адрес фотографии товара для публичной страницы.
+     *
+     * ПЕРЕХОДНЫЙ ПЕРИОД: ДВА ТИПА ПУТЕЙ
+     *
+     * Сейчас в базе встречаются пути обоих типов, и это не ошибка данных:
+     *
+     *  - images/products/<файл>.jpg — новый путь. Файл лежит прямо в
+     *    public/, отслеживается Git и попадает на сервер деплоем.
+     *    Ссылка строится через asset(): от корня сайта, чтобы на
+     *    /products/eggs путь не превратился в /products/images/…
+     *
+     *  - products/<ulid>.<ext> — старый путь, записанный загрузкой через
+     *    админку. Такой файл лежит на диске storage/app/public и
+     *    отдаётся через symlink public/storage, то есть ссылкой
+     *    публичного диска: Storage::disk('public')->url().
+     *
+     * Почему нужна совместимость, а не только новый путь: рабочая база
+     * ещё содержит старые пути, а перезапуск seeder на ней запрещён. Без
+     * второй ветки карточки на локальном сайте стали бы битыми до
+     * первого развёртывания, где базу наполнит ProductCatalogSeeder с
+     * новыми путями.
+     *
+     * Ветка по типу пути, а не «попробовать asset(), иначе Storage»:
+     * решение принимает вид значения, а не наличие файла, поэтому рендер
+     * детерминирован и не зависит от того, что лежит на диске в данный
+     * момент. Тип пути — единственное, что известно о нём надёжно.
+     *
+     * Пустое значение возвращает null, а не «/»: пустой src хуже
+     * отсутствия, потому что браузер запросил бы страницу как картинку.
+     * Компонент карточки в этом случае показывает заглушку.
+     */
+    public function imageUrl(): ?string
+    {
+        $path = $this->image;
+
+        if (! is_string($path) || trim($path) === '') {
+            return null;
+        }
+
+        $path = trim($path);
+
+        // Старый управляемый путь загрузок админки: только products/<файл>.
+        // Проверка строгая: чужой путь не должен молча превратиться в
+        // ссылку публичного диска.
+        if (str_starts_with($path, 'products/')
+            && ! str_contains($path, '..')
+            && ! str_contains($path, '\\')
+        ) {
+            return Storage::disk('public')->url($path);
+        }
+
+        // Новый путь внутри public/.
+        return asset($path);
     }
 
     /**

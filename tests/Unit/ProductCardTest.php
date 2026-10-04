@@ -65,7 +65,7 @@ final class ProductCardTest extends TestCase
 
     public function test_it_collects_nothing_when_specs_are_absent(): void
     {
-        $card = new ProductCard(name: 'Вариант продукции 01');
+        $card = new ProductCard(name: 'Яйцо куриное C0');
 
         $this->assertSame([], $card->visibleSpecs());
         $this->assertFalse($card->hasSpecs());

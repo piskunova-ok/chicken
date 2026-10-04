@@ -11,7 +11,6 @@ use App\Models\User;
 use Database\Seeders\ProductCatalogSeeder;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use RuntimeException;
@@ -203,7 +202,16 @@ class ProductImageOrphanOnUpdateFailureTest extends TestCase
                 'record' => $product->getKey(),
             ])
                 ->set('data.image', null)
-                ->fillForm(['image' => ['shared-key' => $sharedImage]])
+                ->fillForm([
+                    'image' => ['shared-key' => $sharedImage],
+                    // Имя меняется обязательно: пока загрузка отключена,
+                    // поле image не обезвоживается, и без другого изменённого
+                    // поля Eloquent не счёл бы запись «грязной» — событие
+                    // updating() просто не сработало бы, и сбой не наступил
+                    // бы вовсе. Проверяется та же ветка EditProduct, что и
+                    // раньше, просто срабатывающая по другому полю.
+                    'name' => 'Переименованный товар',
+                ])
                 ->call('save');
         } catch (RuntimeException $exception) {
             $thrown = $exception;
@@ -234,29 +242,40 @@ class ProductImageOrphanOnUpdateFailureTest extends TestCase
         );
     }
 
-    public function test_new_uploaded_file_is_removed_when_record_update_fails(): void
+    /**
+     * СБОЙ ЗАПИСИ НЕ ОСТАВЛЯЕТ НОВЫХ ФАЙЛОВ, ПОТОМУ ЧТО ЗАГРУЗКИ НЕТ
+     *
+     * Поле image убрано из формы целиком и заменено read-only Placeholder,
+     * поэтому файл из формы не обезвоживается и на диск не попадает.
+     * Значит «висящего» файла не возникает — и это проверяется напрямую.
+     *
+     * Раньше здесь был тест обратного: новый загруженный файл обязан был
+     * удалиться при сбое записи. Пока загрузка работала, сценарий был
+     * достижим; теперь он недостижим через интерфейс, поэтому подтверждать
+     * его было бы проверкой мёртвого кода.
+     *
+     * Код EditProduct::deleteUncommittedImage() и handleRecordUpdate()
+     * оставлены намеренно: они понадобятся при переходе на постоянное
+     * хранилище, а удалять проверенную страховку вместе с отключением
+     * загрузки — значит проверять её заново с нуля.
+     */
+    public function test_a_failed_update_creates_no_new_file_when_upload_is_disabled(): void
     {
         $product = $this->productWithImageA();
 
         $this->assertSame(
             [self::IMAGE_A],
             $this->filesOnDisk(),
-            'До загрузки на fake-диске должен лежать только файл A.',
+            'До попытки на fake-диске должен лежать только файл A.',
         );
 
-        // Сбой индуцируется на реальной записи Product: слушатель
-        // бросает исключение прямо в save(). Страница при этом —
-        // штатная EditProduct, без подмены, поэтому проверяется
-        // production-исправление, а не тестовая обёртка.
-        $attemptedImage = null;
+        // Сбой индуцируется на реальной записи Product: слушатель бросает
+        // исключение прямо в save(). Страница при этом — штатная
+        // EditProduct, без подмены.
         $attempts = 0;
 
-        Product::updating(function (Product $updating) use (&$attemptedImage, &$attempts): void {
+        Product::updating(function () use (&$attempts): void {
             $attempts++;
-
-            $attemptedImage = is_string($updating->image)
-                ? $updating->image
-                : null;
 
             throw new RuntimeException(self::FAILURE_MESSAGE);
         });
@@ -267,74 +286,41 @@ class ProductImageOrphanOnUpdateFailureTest extends TestCase
             Livewire::test(EditProduct::class, [
                 'record' => $product->getKey(),
             ])
-                // браузер при замене оставляет в состоянии только новый файл
-                ->set('data.image', null)
                 ->fillForm([
-                    'image' => [
-                        'new-upload' => UploadedFile::fake()
-                            ->create('new-image.jpg', 10, 'image/jpeg'),
-                    ],
+                    'name' => 'Переименованный товар',
                 ])
                 ->call('save');
         } catch (RuntimeException $exception) {
             $thrown = $exception;
         }
 
-        // 1. Сохранение упало исключением на этапе записи.
         $this->assertInstanceOf(
             RuntimeException::class,
             $thrown,
-            'save() должен был упасть исключением на этапе записи записи.',
+            'save() должен был упасть исключением на этапе записи.',
         );
 
         $this->assertSame(self::FAILURE_MESSAGE, $thrown->getMessage());
 
-        // Сбой произошёл именно на записи: не раньше (валидация) и не
-        // позже (afterSave).
         $this->assertSame(
             1,
             $attempts,
             'Запись должна была быть достигнута ровно один раз и упасть там.',
         );
 
-        $newFile = $attemptedImage;
-
-        // Форма дошла до записи с новым путём — значит dehydrate уже
-        // сохранил файл на диск.
-        $this->assertNotNull(
-            $newFile,
-            'Форма должна была передать новый путь изображения в запись.',
-        );
-
-        $this->assertStringStartsWith(
-            self::PRODUCTS_DIRECTORY.'/',
-            $newFile,
-        );
-
-        $this->assertNotSame(
-            self::IMAGE_A,
-            $newFile,
-            'Новый путь должен отличаться от пути старого изображения A.',
-        );
-
-        // 2. В БД осталось старое значение A: транзакция откатилась.
+        // 1. В БД осталось прежнее значение: транзакция откатилась, а
+        //    заблокированное поле не подменило путь на новый.
         $this->assertSame(
             self::IMAGE_A,
             $product->fresh()->image,
             'После сбоя записи products.image должен остаться прежним (A).',
         );
 
-        // 3. Старый файл A сохранился: afterSave() не выполнялся,
-        //    а удалять его при отсутствии записи и нельзя.
+        // 2. Старый файл A сохранился: afterSave() не выполнялся, а
+        //    удалять его при отсутствии записи и нельзя.
         Storage::disk('public')->assertExists(self::IMAGE_A);
 
-        // 4. Новый неиспользуемый файл B удалён, осиротевшего файла нет.
-        Storage::disk('public')->assertMissing(
-            $newFile,
-            'Новый файл не должен оставаться на диске после сбоя записи:'
-            .' ссылка на него потеряна, удалять некому.',
-        );
-
+        // 3. Новых файлов не появилось — уборке нечего было делать.
         $this->assertSame(
             [self::IMAGE_A],
             $this->filesOnDisk(),

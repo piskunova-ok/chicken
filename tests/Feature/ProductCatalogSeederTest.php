@@ -49,24 +49,50 @@ final class ProductCatalogSeederTest extends TestCase
         'supovye-nabory' => ['chicken', 'Суповые наборы', 6],
         'drugie-produkty' => ['chicken', 'Другие продукты', 7],
 
-        // Яйца кур — временные демонстрационные позиции, 1…3.
-        'variant-01' => ['eggs', 'Вариант продукции 01', 1],
-        'variant-02' => ['eggs', 'Вариант продукции 02', 2],
-        'variant-03' => ['eggs', 'Вариант продукции 03', 3],
+        // Яйца кур — подтверждённые категории C0, C1 и C2, sort_order с 1 по 3.
+        'egg-c0' => ['eggs', 'Яйцо куриное C0', 1],
+        'egg-c1' => ['eggs', 'Яйцо куриное C1', 2],
+        'egg-c2' => ['eggs', 'Яйцо куриное C2', 3],
     ];
 
     /**
      * Поля, которые заказчиком не подтверждены и обязаны остаться NULL.
      *
+     * image здесь нет: фотографии подтверждены и лежат в public/images/products,
+     * поэтому путь в image задаёт seeder (см. EXPECTED_IMAGES).
+     *
      * @var list<string>
      */
     private const EXPECTED_NULL_FIELDS = [
-        'image',
         'weight',
         'packaging',
         'storage',
         'shelf_life',
         'additional_info',
+    ];
+
+    /**
+     * Подтверждённые фотографии: slug => путь относительно public/.
+     *
+     * Файлы лежат в public/images/products и отслеживаются Git, поэтому seeder
+     * пишет именно такой путь, а страница строит ссылку через asset(). Путь
+     * хранится относительным, а не абсолютным и не URL: он переживает смену
+     * домена и не врёт о способе отдачи файла.
+     *
+     * Товар без фотографии в списке отсутствует — его image обязан быть NULL.
+     *
+     * @var array<string, string>
+     */
+    private const EXPECTED_IMAGES = [
+        'tushka-kuritsy' => 'images/products/tushka-kuritsy.jpg',
+        'okorochka' => 'images/products/okorochka.jpg',
+        'kurinye-bedra' => 'images/products/kurinye-bedra.jpg',
+        'kurinye-serdtsa' => 'images/products/kurinye-serdtsa.jpg',
+        'kurinaya-pechen' => 'images/products/kurinaya-pechen.jpg',
+        'supovye-nabory' => 'images/products/supovye-nabory.jpg',
+        'egg-c0' => 'images/products/egg-c0.jpg',
+        'egg-c1' => 'images/products/egg-c1.jpg',
+        'egg-c2' => 'images/products/egg-c2.jpg',
     ];
 
     /**
@@ -90,15 +116,17 @@ final class ProductCatalogSeederTest extends TestCase
     ];
 
     /**
-     * Временные позиции яиц: подтверждённого ассортимента заказчика за ними
-     * не стоит, описаний у них нет.
+     * Позиции яиц: подтверждённые категории C0, C1 и C2.
+     *
+     * Коротких описаний у них нет — ни в конфиге, ни у заказчика, — поэтому
+     * seeder не имеет права их сочинять.
      *
      * @var list<array{name: string, slug: string}>
      */
     private const CONFIRMED_EGGS = [
-        ['name' => 'Вариант продукции 01', 'slug' => 'variant-01'],
-        ['name' => 'Вариант продукции 02', 'slug' => 'variant-02'],
-        ['name' => 'Вариант продукции 03', 'slug' => 'variant-03'],
+        ['name' => 'Яйцо куриное C0', 'slug' => 'egg-c0'],
+        ['name' => 'Яйцо куриное C1', 'slug' => 'egg-c1'],
+        ['name' => 'Яйцо куриное C2', 'slug' => 'egg-c2'],
     ];
 
     // ------------------------------------------------------------------
@@ -142,7 +170,7 @@ final class ProductCatalogSeederTest extends TestCase
         $this->assertSame(7, $this->category('chicken')->products()->count());
     }
 
-    public function test_eggs_contains_exactly_three_temporary_products(): void
+    public function test_eggs_contains_exactly_three_categorised_products(): void
     {
         $this->seed(ProductCatalogSeeder::class);
 
@@ -150,9 +178,8 @@ final class ProductCatalogSeederTest extends TestCase
 
         $this->assertSame(3, $eggs->products()->count());
 
-        // Позиции яиц — временные заглушки, а не ассортимент заказчика.
         $this->assertSame(
-            ['Вариант продукции 01', 'Вариант продукции 02', 'Вариант продукции 03'],
+            array_column(self::CONFIRMED_EGGS, 'name'),
             $eggs->products()->orderBy('sort_order')->pluck('name')->all(),
         );
     }
@@ -220,19 +247,104 @@ final class ProductCatalogSeederTest extends TestCase
         }
     }
 
-    public function test_eggs_temporary_products_have_no_description(): void
+    public function test_eggs_have_no_description(): void
     {
         $this->seed(ProductCatalogSeeder::class);
 
-        // В config/catalog.php у временных позиций яиц нет короткого
-        // описания, поэтому переносить нечего: поле остаётся пустым.
+        // Утверждённых описаний для категорий яиц нет, поэтому переносить
+        // нечего: поле остаётся пустым.
         foreach ($this->category('eggs')->products as $product) {
             $this->assertNull($product->short_description);
         }
     }
 
     // ------------------------------------------------------------------
-    // 4. Slug
+    // 4. Фотографии
+    // ------------------------------------------------------------------
+
+    public function test_every_product_with_a_confirmed_photo_gets_the_expected_path(): void
+    {
+        $this->seed(ProductCatalogSeeder::class);
+
+        foreach (self::EXPECTED_IMAGES as $slug => $expectedImage) {
+            $this->assertSame(
+                $expectedImage,
+                Product::where('slug', $slug)->value('image'),
+                "Путь к фотографии товара {$slug} не совпадает с ожидаемым.",
+            );
+        }
+    }
+
+    public function test_image_paths_are_relative_and_live_inside_public(): void
+    {
+        $this->seed(ProductCatalogSeeder::class);
+
+        foreach (Product::whereNotNull('image')->get() as $product) {
+            $image = $product->image;
+
+            // Ни абсолютного пути, ни URL, ни пути на диск Filament: файл
+            // каталога лежит в public/ и отслеживается Git.
+            $this->assertStringStartsWith('images/products/', $image);
+            $this->assertStringNotContainsString('storage/app', $image);
+            $this->assertStringNotContainsString('/storage/', $image);
+            $this->assertStringNotContainsString('://', $image);
+            $this->assertStringNotContainsString('\\', $image);
+            $this->assertStringEndsWith('.jpg', $image);
+        }
+    }
+
+    public function test_a_product_without_a_confirmed_photo_keeps_image_null(): void
+    {
+        $this->seed(ProductCatalogSeeder::class);
+
+        // У обобщённой позиции «Другие продукты» фотографии нет, и подставить
+        // чужую картинку было бы выдумкой.
+        $this->assertNull(
+            Product::where('slug', 'drugie-produkty')->value('image'),
+        );
+
+        $this->assertSame(
+            9,
+            Product::whereNotNull('image')->count(),
+            'Фотографии подтверждены у девяти товаров из десяти.',
+        );
+    }
+
+    /**
+     * Точный набор товаров с фотографией. Проверяет и количество, и то, что
+     * лишнего фото не появилось: девять из десяти, а не «сколько вышло».
+     */
+    public function test_the_set_of_products_with_images_is_exact(): void
+    {
+        $this->seed(ProductCatalogSeeder::class);
+
+        $slugs = Product::whereNotNull('image')
+            ->orderBy('slug')
+            ->pluck('slug')
+            ->all();
+
+        $expected = array_keys(self::EXPECTED_IMAGES);
+        sort($expected);
+
+        $this->assertSame($expected, $slugs);
+    }
+
+    public function test_every_declared_photo_file_exists_in_public(): void
+    {
+        $this->seed(ProductCatalogSeeder::class);
+
+        // Seeder не должен ссылаться на файл, которого нет в репозитории:
+        // каталог и его фотографии обязаны воспроизводиться из Git целиком.
+        foreach (self::EXPECTED_IMAGES as $slug => $relativePath) {
+            $this->assertFileExists(
+                public_path($relativePath),
+                "Файл фотографии товара {$slug} не найден в public/.",
+            );
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 5. Slug
     // ------------------------------------------------------------------
 
     public function test_slugs_match_the_expected_set(): void
@@ -256,7 +368,7 @@ final class ProductCatalogSeederTest extends TestCase
     }
 
     // ------------------------------------------------------------------
-    // 5. Повторный запуск
+    // 6. Повторный запуск
     // ------------------------------------------------------------------
 
     public function test_repeated_seeding_creates_no_duplicates(): void
@@ -325,7 +437,7 @@ final class ProductCatalogSeederTest extends TestCase
     }
 
     // ------------------------------------------------------------------
-    // 6. Совпадение с подтверждённым текстом
+    // 7. Совпадение с подтверждённым текстом
     // ------------------------------------------------------------------
 
     public function test_chicken_descriptions_match_the_confirmed_text_verbatim(): void
@@ -378,12 +490,12 @@ final class ProductCatalogSeederTest extends TestCase
         );
     }
 
-    public function test_eggs_temporary_products_never_gain_a_description(): void
+    public function test_eggs_products_never_gain_a_description(): void
     {
         $this->seed(ProductCatalogSeeder::class);
 
-        // Утверждённых описаний для временных позиций яиц нет нигде, и
-        // seeder не имеет права их сочинить.
+        // Утверждённых описаний для категорий яиц нет нигде, и seeder не
+        // имеет права их сочинить.
         foreach ($this->category('eggs')->products as $product) {
             $this->assertNull($product->short_description);
         }

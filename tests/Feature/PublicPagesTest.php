@@ -164,7 +164,7 @@ final class PublicPagesTest extends TestCase
         // случайным набором позиций.
         $this->get('/products')
             ->assertOk()
-            ->assertDontSee('Вариант продукции 01')
+            ->assertDontSee('Яйцо куриное C0')
             ->assertDontSee('Тушка курицы');
     }
 

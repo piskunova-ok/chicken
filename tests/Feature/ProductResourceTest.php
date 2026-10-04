@@ -16,6 +16,8 @@ use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\FileUpload;
+use Filament\Schemas\Components\Component;
 use Illuminate\Contracts\Pagination\Paginator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -1144,30 +1146,58 @@ class ProductResourceTest extends TestCase
         );
     }
 
-    public function test_the_form_has_an_image_fileupload_field(): void
+    /**
+     * В форме товара НЕТ поля загрузки файла — только показ пути.
+     *
+     * Фотографии каталога лежат в public/images/products и обновляются через
+     * Git. Загрузка через панель дала бы путь на временный диск storage, который
+     * не переживает деплой, поэтому её убрали целиком, а не просто заблокировали.
+     *
+     * Поле image_path остаётся видимым: администратор должен видеть, какая
+     * фотография прописана у товара, иначе пришлось бы лезть в базу.
+     */
+    public function test_the_form_shows_the_photo_path_and_offers_no_upload(): void
     {
         $this->actingAsAdmin();
 
         $product = $this->productIn($this->eggs());
 
+        $this->assertSame('images/products/egg-c0.jpg', $product->image);
+
         $form = Livewire::test(EditProduct::class, ['record' => $product->getKey()])
             ->instance()
             ->getSchema('form');
 
+        $components = $form->getComponents(withHidden: true);
+
         $fieldNames = array_map(
             static fn ($component): ?string => $component->getName(),
-            $form->getComponents(withHidden: true),
+            $components,
         );
 
-        $this->assertContains('image', $fieldNames);
+        $this->assertContains('image_path', $fieldNames, 'Показ пути к фотографии должен остаться.');
+        $this->assertNotContains('image', $fieldNames, 'Поля image в форме быть не должно.');
 
-        $this->assertTrue(
-            $this->formHasFileUpload($form->getComponents(withHidden: true)),
-            'В форме должен быть FileUpload для поля image.',
+        // Компонент загрузки файлов в форме отсутствует полностью: пока он
+        // есть, загрузку можно случайно вернуть и снова получить временные
+        // фотографии, исчезающие при деплое.
+        $this->assertFalse(
+            $this->formHasFileUpload($components),
+            'В форме не должно быть ни одного компонента загрузки файлов.',
         );
     }
 
-    public function test_creating_a_product_with_an_image_writes_a_relative_public_disk_path(): void
+    /**
+     * Создание товара с файлом НЕ записывает путь в products.image.
+     *
+     * Загрузка в панели отключена (ProductForm, поле image помечено
+     * disabled): фотографии каталога лежат в public/images/products и
+     * обновляются через Git. Поэтому товар, созданный из админки, остаётся
+     * без картинки, пока её не добавят в репозиторий.
+     *
+     * Полный сценарий путей в базе — в ProductImageUploadTest.
+     */
+    public function test_creating_a_product_with_an_image_stores_no_public_disk_path(): void
     {
         $this->actingAsAdmin();
         Storage::fake('public');
@@ -1185,19 +1215,21 @@ class ProductResourceTest extends TestCase
 
         $product = Product::query()->where('slug', self::NEW_SLUG)->firstOrFail();
 
-        $this->assertMatchesRegularExpression('#^products/[A-Za-z0-9_-]+\.jpg$#', $product->image);
-        Storage::disk('public')->assertExists($product->image);
+        $this->assertNull(
+            $product->image,
+            'Путь на диск storage не должен попадать в базу: страница читает public/.',
+        );
     }
 
     /**
      * Есть ли в компонентах формы хоть один элемент загрузки файлов.
      *
-     * @param  iterable<\Filament\Schemas\Components\Component>  $components
+     * @param  iterable<Component>  $components
      */
     private function formHasFileUpload(iterable $components): bool
     {
         foreach ($components as $component) {
-            if ($component instanceof \Filament\Forms\Components\FileUpload) {
+            if ($component instanceof FileUpload) {
                 return true;
             }
 

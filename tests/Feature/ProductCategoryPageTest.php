@@ -44,14 +44,14 @@ final class ProductCategoryPageTest extends TestCase
     ];
 
     /**
-     * Временные позиции яиц в порядке sort_order.
+     * Категории яиц в порядке sort_order.
      *
      * @var list<string>
      */
     private const EGGS_ORDER = [
-        'Вариант продукции 01',
-        'Вариант продукции 02',
-        'Вариант продукции 03',
+        'Яйцо куриное C0',
+        'Яйцо куриное C1',
+        'Яйцо куриное C2',
     ];
 
     protected function setUp(): void
@@ -153,7 +153,7 @@ final class ProductCategoryPageTest extends TestCase
         // Товар переносим из eggs в chicken, но сохраняем активным: если бы
         // отбор шёл только по is_active, он попал бы на страницу мяса.
         $chickenId = ProductCategory::where('slug', 'chicken')->value('id');
-        $moved = Product::where('name', 'Вариант продукции 01')->update([
+        $moved = Product::where('name', 'Яйцо куриное C0')->update([
             'product_category_id' => $chickenId,
             'sort_order' => 8,
         ]);
@@ -164,11 +164,11 @@ final class ProductCategoryPageTest extends TestCase
         $eggs = $this->get('/products/eggs')->assertOk();
 
         // Перенесённый товар уехал на страницу своей новой категории.
-        $chicken->assertSee('Вариант продукции 01');
+        $chicken->assertSee('Яйцо куриное C0');
         $this->assertSame(8, $this->cardCount($chicken->getContent()));
 
         // На странице яиц остались только два «своих» товара.
-        $eggs->assertDontSee('Вариант продукции 01');
+        $eggs->assertDontSee('Яйцо куриное C0');
         $this->assertSame(2, $this->cardCount($eggs->getContent()));
     }
 
@@ -212,7 +212,7 @@ final class ProductCategoryPageTest extends TestCase
             $response->assertDontSee($name);
         }
 
-        foreach (['variant-01', 'variant-02', 'variant-03'] as $slug) {
+        foreach (['egg-c0', 'egg-c1', 'egg-c2'] as $slug) {
             $response->assertDontSee('/products/'.$slug, false);
         }
 
@@ -252,7 +252,7 @@ final class ProductCategoryPageTest extends TestCase
 
         // Возвращаем один товар: блок ассортимента и его прежний заголовок
         // обязаны вернуться сами, без правок конфига.
-        Product::where('name', 'Вариант продукции 01')->update(['is_active' => true]);
+        Product::where('name', 'Яйцо куриное C0')->update(['is_active' => true]);
 
         $filled = $this->get('/products/eggs')->assertOk();
 
@@ -260,7 +260,7 @@ final class ProductCategoryPageTest extends TestCase
         $filled->assertDontSee(config('content.catalog.empty_text'), false);
         $filled->assertSee(config('catalog.eggs.catalog.heading'), false);
         $filled->assertSee(config('catalog.eggs.catalog.lead'), false);
-        $filled->assertSee('Вариант продукции 01');
+        $filled->assertSee('Яйцо куриное C0');
         $this->assertSame(1, $this->cardCount($filled->getContent()));
     }
 
@@ -434,24 +434,81 @@ final class ProductCategoryPageTest extends TestCase
             ->assertOk()
             ->assertSee('aria-hidden="true"', false);
 
-        // Пустой src был бы хуже отсутствия: браузер запросил бы текущую
-        // страницу как картинку.
-        $this->assertNull(Product::where('name', 'Тушка курицы')->value('image'));
+        // «Другие продукты» — обобщённая позиция, подтверждённой фотографии
+        // у неё нет, поэтому на месте остаётся заглушка.
+        $this->assertNull(Product::where('name', 'Другие продукты')->value('image'));
     }
 
     /**
-     * Загруженные через админку изображения (disk 'public', каталог
-     * products) страница показывает URL-ом публичного диска. Раньше здесь
-     * был asset(): он предполагал относительный путь внутри public/, а
-     * загрузки живут в storage/app/public и отдаются через /storage.
+     * Фотографии товаров лежат в public/images/products и отслеживаются Git,
+     * поэтому страница строит ссылку через asset() от корня сайта. Раньше
+     * здесь был Storage::disk('public')->url(): он указывал на загрузки
+     * админки в storage/app/public, которых у каталога больше нет.
      */
-    public function test_a_real_image_path_is_turned_into_a_public_disk_url(): void
+    public function test_a_seeded_photo_is_rendered_as_an_asset_url(): void
     {
-        Product::where('name', 'Тушка курицы')->update(['image' => 'products/tushka.jpg']);
-
         $this->get('/products/chicken')
             ->assertOk()
-            ->assertSee('src="'.Storage::disk('public')->url('products/tushka.jpg').'"', false);
+            ->assertSee('src="'.asset('images/products/tushka-kuritsy.jpg').'"', false);
+    }
+
+    /**
+     * Ссылка строится от корня сайта, а не от текущего адреса. На /products/…
+     * относительный путь превратился бы в /products/images/… и дал 404.
+     */
+    public function test_photo_urls_are_rooted_and_never_leave_the_products_directory(): void
+    {
+        $html = $this->get('/products/chicken')->assertOk()->getContent();
+
+        $this->assertStringContainsString('/images/products/', $html);
+        $this->assertStringNotContainsString('/products/images/', $html);
+    }
+
+    /**
+     * Старый путь из загрузок админки — products/<ulid>.<ext> — лежит на
+     * диске storage/app/public и отдаётся публичным диском, а не asset().
+     *
+     * Такие пути всё ещё есть в рабочей базе: она заполнялась через админку
+     * и не перезапускалась seeder'ом. Пока они встречаются в данных,
+     * страница обязана их показывать, иначе карточки на локальном сайте
+     * останутся битыми до первого развёртывания.
+     *
+     * Тест повторяет реальное состояние рабочей базы, а не состояние
+     * seeder'а: запись создаётся вручную со старым форматом пути.
+     */
+    public function test_a_legacy_managed_path_is_rendered_through_the_public_disk(): void
+    {
+        // Товары удаляются, категории — нет: она создана в setUp, а slug у
+        // неё уникален, поэтому повторное создание упало бы на констрейнте.
+        Product::query()->delete();
+
+        $product = ProductCategory::query()
+            ->where('slug', 'eggs')
+            ->firstOrFail()
+            ->products()
+            ->create([
+                'name' => 'Яйцо куриное C0',
+                'slug' => 'egg-c0',
+                'short_description' => 'Проверка старого формата пути.',
+                'image' => 'products/01M3T1AMSMS67QZFV35HBX9ZPW.png',
+                'is_active' => true,
+                'sort_order' => 1,
+            ]);
+
+        // Диск подменяется фейком: проверяется вид ссылки, а не наличие
+        // файла. Сам файл в тестовом окружении не создаётся намеренно.
+        Storage::fake('public');
+
+        $expected = Storage::disk('public')->url('products/01M3T1AMSMS67QZFV35HBX9ZPW.png');
+
+        $html = $this->get('/products/eggs')->assertOk()->getContent();
+
+        $this->assertStringContainsString('src="'.$expected.'"', $html);
+        $this->assertFalse(
+            str_contains($expected, '/images/products/'),
+            'Старый путь не должен попадать в ветку новых файлов внутри public/.'
+        );
+        $this->assertSame('products/01M3T1AMSMS67QZFV35HBX9ZPW.png', $product->fresh()->image);
     }
 
     public function test_the_details_button_is_absent_without_a_details_url(): void
