@@ -43,6 +43,7 @@
     $fields = (array) ($text['fields'] ?? []);
 
     $status = session(StoreContactRequest::STATUS_KEY);
+    $mailError = session(StoreContactRequest::ERROR_KEY);
 
     $controlBase = 'w-full rounded-control border bg-surface px-4 py-3 text-body text-ink '
         .'transition-colors duration-200 ease-soft placeholder:text-ink-muted/70 '
@@ -84,7 +85,7 @@
           * помечен data-form-result, и resources/js/app.js переносит на него
             фокус после загрузки страницы.
 
-        data-form-result есть только у этих двух блоков, а они рендерятся
+        data-form-result есть только у этих трёх блоков, а они рендерятся
         исключительно после отправки формы. Обычный GET /contacts не
         содержит ни одного из них, поэтому фокус никто не перехватывает.
     --}}
@@ -96,6 +97,28 @@
             tabindex="-1"
             class="mt-6 rounded-control border border-line-strong bg-surface px-4 py-3 text-small text-ink"
         >{{ $status }}</p>
+    @endif
+
+    {{--
+        ОТПРАВКА НЕ УДАЛАСЬ
+
+        Роль alert, а не status: сбой — это событие, о котором нужно узнать
+        немедленно, и как у списка ошибок валидации. role="status" вообще
+        не должен использоваться для сообщений, требующих реакции.
+
+        Текст берётся из config/content.php (mail_failed) и никогда не
+        содержит причины сбоя: адрес SMTP-сервера, логин и текст ошибки
+        транспорта посетителю не нужны и не должны просачиваться с самой
+        страницы. Подробности пишет контроллер только в серверный лог.
+    --}}
+    @if (filled($mailError))
+        <p
+            id="contact-form-mail-error"
+            data-form-result
+            role="alert"
+            tabindex="-1"
+            class="mt-6 rounded-control border border-danger bg-surface px-4 py-3 text-small text-danger"
+        >{{ $mailError }}</p>
     @endif
 
     @if ($errors->any())
@@ -262,7 +285,7 @@
                 <button
                     type="submit"
                     class="inline-flex w-full items-center justify-center gap-2 rounded-control bg-primary px-6 py-3.5 text-body font-semibold text-ink-inverse transition-colors duration-200 ease-soft hover:bg-primary-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-dark sm:w-auto"
-                >{{ $text['submit'] ?? 'Проверить форму' }}</button>
+                >{{ $text['submit'] ?? 'Отправить сообщение' }}</button>
 
                 <p class="mt-4 text-small text-ink-muted">{{ $text['note'] ?? '' }}</p>
             </div>

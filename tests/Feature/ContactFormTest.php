@@ -5,14 +5,25 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Http\Requests\StoreContactRequest;
+use App\Mail\ContactFormMail;
 use Database\Seeders\ProductCatalogSeeder;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Mail\Transport\ArrayTransport;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
+use Symfony\Component\Mailer\Envelope;
+use Symfony\Component\Mailer\Exception\TransportException;
+use Symfony\Component\Mailer\SentMessage;
+use Symfony\Component\Mailer\Transport\TransportInterface;
+use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Email;
+use Symfony\Component\Mime\RawMessage;
 use Tests\TestCase;
 
 /**
@@ -31,17 +42,22 @@ use Tests\TestCase;
  *    выглядит снаружи как успешная отправка, а превышение лимита даёт
  *    честный 429.
  * 6. Форма доступна с клавиатуры и экранным диктором: обязательные поля
- *    помечены, а результат отправки — успех или ошибки — получает фокус.
+ *    помечены, а результат отправки — успех или ошибка — получает фокус.
  * 7. CSRF не сломан: POST-маршрут остаётся в группе web вместе со
  *    стандартным middleware Laravel.
- * 8. Этап технический: ни письма, ни записи в базу, ни новой таблицы.
+ * 8. Заявка уходит письмом ровно один раз и на адрес из конфига, а
+ *    неверно заполненная форма не шлёт ничего.
+ * 9. Сбой отправки показывает посетителю понятное сообщение и ни в коем
+ *    случае — технические подробности.
+ * 10. Письмо не оставляет следа в базе: ни новой таблицы, ни новой записи.
  *
  * ЧТО ЗДЕСЬ НЕ ПРОВЕРЯЕТСЯ
  *
- * Реальной отправки ещё нет, поэтому тест не может утверждать, что
- * посетитель получил письмо. Наоборот, пункт 8 специально следит, чтобы
- * письмо не ушло и данные не залегли в базу: пока канала связи нет,
- * обещание отправки было бы неправдой.
+ * Реальная доставка письма тесту недоступна: транспорт в phpunit.xml —
+ * array, он складывает письма в память и по сети ничего не отправляет.
+ * Поэтому проверяется то, что контроллер сформировал и направил письмо
+ * получателю из конфига, — авторизация на SMTP-сервере и ответ почтовой
+ * машины остаются за пределами теста.
  *
  * Само срабатывание CSRF тоже не проверяется запросом: Laravel пропускает
  * его во время runningUnitTests(), поэтому тест на middleware-конфигурацию
@@ -282,7 +298,7 @@ final class ContactFormTest extends TestCase
         $response->assertSessionHasNoErrors();
     }
 
-    public function test_a_correct_submission_shows_the_neutral_status_message(): void
+    public function test_a_correct_submission_shows_the_success_message(): void
     {
         $response = $this->post('/contacts', $this->validPayload());
 
@@ -297,7 +313,7 @@ final class ContactFormTest extends TestCase
         $this->get('/contacts')->assertOk()->assertSee($expected);
     }
 
-    public function test_the_status_message_never_claims_the_request_was_sent(): void
+    public function test_the_status_message_states_that_the_message_was_sent_without_any_technical_details(): void
     {
         $response = $this->post('/contacts', $this->validPayload());
 
@@ -305,20 +321,17 @@ final class ContactFormTest extends TestCase
 
         $this->assertMatchesRegularExpression('/[а-яё]/iu', $message);
 
-        // Главная осторожность этого этапа: формулировка не должна
-        // обещать отправку, которой ещё не происходит.
-        foreach ([
-            'заявка отправлена',
-            'отправлено',
-            'мы отправили',
-            'получили вашу',
-            'ответим в течение',
-            'свяжемся с вами',
-        ] as $falsePromise) {
+        // Письмо уходит по-настоящему, поэтому сообщение имеет полное
+        // право сказать это прямо — но только это. Показывать посетителю
+        // адрес сервера, почту отправителя или текст ошибки транспорта
+        // незачем: ему достаточно знать, что сообщение ушло.
+        $this->assertStringContainsString('отправлено', mb_strtolower($message));
+
+        foreach (['smtp', '@', 'mail.ru', 'exception', 'password', '465'] as $technical) {
             $this->assertStringNotContainsString(
-                mb_strtolower($falsePromise),
+                mb_strtolower($technical),
                 mb_strtolower($message),
-                'Сообщение не должно утверждать, что заявка отправлена: '.$falsePromise,
+                'Сообщение об успехе не должно содержать технических подробностей: '.$technical,
             );
         }
 
@@ -623,7 +636,7 @@ final class ContactFormTest extends TestCase
     }
 
     // ------------------------------------------------------------------
-    // 6. Этап технический: ни письма, ни записи в базу
+    // 6. Письмо и база данных
     // ------------------------------------------------------------------
 
     public function test_a_submission_creates_no_table_and_writes_no_record(): void
@@ -655,11 +668,146 @@ final class ContactFormTest extends TestCase
         }
     }
 
-    public function test_a_submission_sends_no_mail(): void
+    public function test_a_correct_submission_sends_exactly_one_notification_mail(): void
     {
-        $this->post('/contacts', $this->validPayload())->assertRedirect(route('contacts'));
+        $this->post('/contacts', $this->validPayload())
+            ->assertRedirect(route('contacts'))
+            ->assertSessionHas(StoreContactRequest::STATUS_KEY, (string) config('content.contact_form.flash'))
+            ->assertSessionHasNoErrors();
+
+        $messages = $this->sentMessages();
+
+        $this->assertCount(1, $messages, 'Корректная отправка должна дать ровно одно письмо.');
+
+        $email = $messages[0]->getOriginalMessage();
+
+        $this->assertInstanceOf(Email::class, $email);
+
+        // Адрес читается из того же config('mail.to'), что и в контроллере.
+        // Тест не хранит адрес отдельно: иначе смена получателя в окружении
+        // здесь бы не заметилась, а письмо поехало бы не туда.
+        $expectedRecipient = (string) config('mail.to');
+
+        $this->assertNotSame('', $expectedRecipient, 'Получатель берётся из CONTACT_MAIL_TO.');
+        $this->assertSame(
+            [$expectedRecipient],
+            array_map(
+                static fn (Address $address): string => $address->getAddress(),
+                $email->getTo(),
+            ),
+        );
+
+        $this->assertSame(ContactFormMail::SUBJECT, $email->getSubject());
+
+        $body = (string) $email->getHtmlBody();
+
+        $this->assertStringContainsString('Иван Петров', $body);
+        $this->assertStringContainsString('+7 900 000-00-00', $body);
+        $this->assertStringContainsString('ivan@example.org', $body);
+        $this->assertStringContainsString('Подскажите, какие позиции есть в наличии.', $body);
+
+        // Письмо — служебное уведомление, а не письмо посетителю: обратный
+        // адрес ему не нужен, поэтому Reply-To в письме не выставляется.
+        $this->assertSame([], $email->getReplyTo());
+    }
+
+    public function test_an_invalid_submission_sends_no_mail_and_reports_validation_errors(): void
+    {
+        $response = $this->post('/contacts', $this->validPayload([
+            'name' => '',
+            'phone' => '',
+            'message' => '',
+        ]));
+
+        // Ошибки валидации, а не ошибка отправки: до deliver() дело не
+        // доходит, поэтому сообщение из content.contact_form.mail_failed
+        // здесь неуместно — это не сбой почты, а неверно заполненная форма.
+        $response->assertSessionHasErrors(['name', 'phone', 'message']);
+        $response->assertSessionMissing(StoreContactRequest::ERROR_KEY);
 
         $this->assertNoMailWasSent();
+    }
+
+    public function test_a_failed_delivery_shows_a_plain_error_instead_of_a_success(): void
+    {
+        // Почтовая транспортная часть отказывает на самом этапе отправки —
+        // так же, как это случилось бы с недоступным SMTP-сервером. Ни один
+        // из этих сбоев не должен дойти до посетителя в сыром виде.
+        $this->breakMailDelivery();
+
+        $response = $this->post('/contacts', $this->validPayload());
+
+        $response->assertRedirect(route('contacts'));
+        $response->assertSessionHas(
+            StoreContactRequest::ERROR_KEY,
+            (string) config('content.contact_form.mail_failed'),
+        );
+
+        // Успех и сбой никогда не показываются вместе: противоречие
+        // посетитель прочитал бы как «письмо всё-таки ушло».
+        $response->assertSessionMissing(StoreContactRequest::STATUS_KEY);
+
+        $html = (string) $this->get('/contacts')->assertOk()->getContent();
+
+        $expected = (string) config('content.contact_form.mail_failed');
+        $this->assertNotSame('', $expected);
+        $this->assertStringContainsString($expected, $html);
+
+        // Сообщение об ошибке — тоже результат отправки, поэтому оно
+        // получает метку и роль для экранного диктора, как и успех.
+        $this->assertMatchesRegularExpression(
+            '/<p[^>]*id="contact-form-mail-error"[^>]*data-form-result[^>]*role="alert"[^>]*tabindex="-1"/',
+            $html,
+            'Ошибка отправки должна получать фокус после отправки.',
+        );
+
+        // Ни причины сбоя, ни данных конфигурации почты в ответе нет:
+        // адрес SMTP-сервера, текст транспортного исключения и класс
+        // исключения относятся к серверу, а не к посетителю.
+        foreach (['smtp.test.invalid', 'TransportException', 'could not be established', 'Connection refused'] as $secret) {
+            $this->assertStringNotContainsString($secret, $html, 'Страница не должна показывать технические подробности.');
+        }
+
+        // Сбоев в отправке не было на самом деле — транспорт только что
+        // отказал, поэтому в почтовом стеке не должно лежать письма.
+        $this->assertNoMailWasSent();
+    }
+
+    public function test_a_delivery_failure_never_writes_the_smtp_password_to_the_log(): void
+    {
+        // Пароль задаётся окружением. Кладём в него метку и смотрим, не
+        // утащил ли кто-нибудь её в лог вместе с текстом ошибки.
+        config(['mail.password' => 'метка-пароля-который-нельзя-логировать']);
+
+        $logged = [];
+
+        Log::listen(static function (MessageLogged $event) use (&$logged): void {
+            $logged[] = $event;
+        });
+
+        $this->breakMailDelivery();
+        $this->post('/contacts', $this->validPayload());
+
+        $this->assertNotEmpty($logged, 'Сбой отправки должен попадать в серверный лог.');
+
+        foreach ($logged as $entry) {
+            $haystack = $entry->message.' '.json_encode($entry->context, JSON_UNESCAPED_UNICODE);
+
+            $this->assertStringNotContainsString(
+                'метка-пароля-который-нельзя-логировать',
+                $haystack,
+                'Лог не должен содержать пароль SMTP.',
+            );
+        }
+
+        // Лог всё же полезен без пароля: причина сбоя нужна оператору.
+        $failures = array_values(array_filter(
+            $logged,
+            static fn (MessageLogged $event): bool => $event->message === 'contact_form: mail delivery failed',
+        ));
+
+        $this->assertCount(1, $failures);
+        $this->assertSame(TransportException::class, $failures[0]->context['exception'] ?? null);
     }
 
     public function test_a_rejected_submission_sends_no_mail(): void
@@ -783,9 +931,47 @@ final class ContactFormTest extends TestCase
      */
     private function assertNoMailWasSent(): void
     {
+        $this->assertCount(0, $this->sentMessages());
+    }
+
+    /**
+     * Письма, которые реально ушли через array-транспорт.
+     */
+    private function sentMessages(): Collection
+    {
         $transport = Mail::mailer('array')->getSymfonyTransport();
 
         $this->assertInstanceOf(ArrayTransport::class, $transport);
-        $this->assertCount(0, $transport->messages());
+
+        return $transport->messages();
+    }
+
+    /**
+     * Заставить отправку падать ровно в точке send().
+     *
+     * Транспорт подменяется через Mail::extend, поэтому сбой происходит
+     * там же, где он случился бы у недоступного SMTP-сервера — в момент
+     * передачи письма, а не при сборке конфигурации почты.
+     */
+    private function breakMailDelivery(): void
+    {
+        Mail::extend('always-failing', static function (array $config): TransportInterface {
+            return new class implements TransportInterface {
+                public function send(RawMessage $message, ?Envelope $envelope = null): ?SentMessage
+                {
+                    throw new TransportException('Connection could not be established with host "smtp.test.invalid:465".');
+                }
+
+                public function __toString(): string
+                {
+                    return 'always-failing';
+                }
+            };
+        });
+
+        config([
+            'mail.mailers.failing' => ['transport' => 'always-failing'],
+            'mail.default' => 'failing',
+        ]);
     }
 }
