@@ -1,11 +1,27 @@
 {{--
     Публичная форма обратной связи для /contacts.
 
-    Все тексты берутся из config/content.php (раздел contact_form) и из
-    lang/ru/validation.php (сообщения об ошибке), поэтому разметка не
-    содержит ни одной собственной строки, которую пришлось бы искать по
-    шаблону. Названия полей в ошибках тоже не продублированы: их Laravel
-    подставляет из секции validation.attributes.
+    Все тексты берутся из config/content.php (раздел contact_form), поэтому
+    разметка не содержит ни одной собственной строки, которую пришлось бы
+    искать по шаблону.
+
+    КАК УХОДИТ ЗАЯВКА
+
+    Форма постится POST-запросом прямо из браузера в Web3Forms
+    (https://api.web3forms.com/submit): сервер Laravel в отправке не
+    участвует, поэтому CSRF-токен не нужен. Access key и служебные поля
+    лежат в скрытых input. Access key — это идентификатор формы Web3Forms,
+    а не секретный ключ: бесплатный тариф принимает только запросы с
+    origin браузера, и ключ должен быть виден в HTML. В Git он не
+    хранится — значение подставляет Blade из config/services.php
+    (env WEB3FORMS_ACCESS_KEY) при рендере.
+
+    ВАЛИДАЦИЯ
+
+    Валидация клиентская, браузерная: у формы НЕТ novalidate, поэтому
+    перед отправкой браузер сам проверит required, type="email" и
+    maxlength и покажет своё сообщение. Источником правил остаётся
+    разметка, а числа maxlength лежат рядом с полями в config/content.php.
 
     КНОПКА — НАТИВНАЯ, А НЕ <x-button>
 
@@ -17,43 +33,30 @@
     <button type="submit"> с теми же классами primary-варианта. Когда у
     компонента появится параметр type, этот блок можно будет заменить.
 
-    ВАЛИДАЦИЯ
+    ОТПРАВКА И РЕЗУЛЬТАТ
 
-    Проверка серверная, поэтому у формы стоит novalidate: иначе браузер
-    остановил бы отправку сам и показал собственное сообщение на языке
-    браузера, а не согласованный русский текст с подсказкой, какое поле
-    исправить. Атрибуты maxlength, наоборот, оставлены — они подсказывают
-    предел до отправки. Пределы взяты из StoreContactRequest::limitFor(),
-    чтобы числа в разметке и в правилах не разошлись.
-
-    ОБЯЗАТЕЛЬНОСТЬ ПОЛЕЙ
-
-    У обязательных полей стоят required и aria-required="true", у почты их
-    нет. Разметка ничего не проверяет — источник истины остаётся серверная
-    валидация, а required и aria-required нужны программам доступности:
-    без них экранный диктор узнаёт об обязательности поля только после
-    неудачной отправки. Флаг required задан рядом с полем в $textFields и
-    в разметке message и consent, а тесты файла проверяют и саму разметку,
-    и реальный отказ сервера, поэтому «забытый» флаг будет замечен.
+    resources/js/app.js перехватывает submit (data-contact-form), шлёт
+    FormData формы на endpoint из action и по ответу API показывает либо
+    сообщение об успехе (success=true в ответе), либо понятную ошибку.
+    Оба блока результата рендерятся заранее, скрытые, а JS лишь снимает
+    hidden и переносит на показанный блок фокус. Сообщение об ошибке
+    никогда не содержит причину сбоя: адрес сервиса и текст ответа
+    посетителю не нужны и не должны просачиваться на страницу.
 --}}
 @php
-    use App\Http\Requests\StoreContactRequest;
-
     $text = (array) config('content.contact_form', []);
     $fields = (array) ($text['fields'] ?? []);
-
-    $status = session(StoreContactRequest::STATUS_KEY);
-    $mailError = session(StoreContactRequest::ERROR_KEY);
+    $accessKey = (string) config('services.web3forms.access_key');
+    $endpoint = 'https://api.web3forms.com/submit';
 
     $controlBase = 'w-full rounded-control border bg-surface px-4 py-3 text-body text-ink '
         .'transition-colors duration-200 ease-soft placeholder:text-ink-muted/70 '
         .'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
     $controlOk = $controlBase.' border-line-strong';
-    $controlError = $controlBase.' border-danger';
 
     /*
-     * Текстовые поля идут циклом, а не четырьмя копиями одного блока:
-     * подпись, ошибка и подсказка при смене дизайна правятся в одном месте.
+     * Текстовые поля идут циклом, а не тремя копиями одного блока:
+     * подпись и подсказка при смене дизайна правятся в одном месте.
      * У каждого поля своя id, потому что label связан с input через for —
      * без него подпись не кликается и не читается программами доступности.
      */
@@ -75,120 +78,59 @@
     {{--
         РЕЗУЛЬТАТ ОТПРАВКИ — ДЛЯ КЛАВИАТУРЫ И ЭКРАННОГО ДИКТОРА
 
-        Одного role="status" мало: результат появляется при перезагрузке
-        страницы, а такую live-область экранный диктор обычно не озвучивает,
-        потому что при обычной навигации содержимое документа появляется
-        вместе с самим документом. Поэтому результат дополнительно:
+        Одного role="status" мало: результат появляется на той же странице
+        без перезагрузки, а живое объявление live-области при добавлении
+        контента диктор озвучивает не всегда. Поэтому оба блока дополнительно:
 
-          * получает tabindex="-1", чтобы его можно было programmatic
+          * получают tabindex="-1", чтобы их можно было programmatic
             сфокусировать — фокус озвучивается всегда;
-          * помечен data-form-result, и resources/js/app.js переносит на него
-            фокус после загрузки страницы.
+          * помечены data-form-result, а resources/js/app.js либо убирает
+            с показанного блока hidden (при работе без фреймворков), либо
+            переносит на него фокус.
 
-        data-form-result есть только у этих трёх блоков, а они рендерятся
-        исключительно после отправки формы. Обычный GET /contacts не
-        содержит ни одного из них, поэтому фокус никто не перехватывает.
+        Блоки рендерятся всегда, но скрыты атрибутом hidden: обычный
+        GET /contacts их не показывает и фокус никто не перехватывает
+        (initFormResultFocus игнорирует скрытые элементы).
     --}}
-    @if (filled($status))
-        <p
-            id="contact-form-status"
-            data-form-result
-            role="status"
-            tabindex="-1"
-            class="mt-6 rounded-control border border-line-strong bg-surface px-4 py-3 text-small text-ink"
-        >{{ $status }}</p>
-    @endif
+    <p
+        id="contact-form-status"
+        data-form-result
+        role="status"
+        tabindex="-1"
+        hidden
+        class="mt-6 rounded-control border border-line-strong bg-surface px-4 py-3 text-small text-ink"
+    >{{ $text['flash'] ?? '' }}</p>
 
-    {{--
-        ОТПРАВКА НЕ УДАЛАСЬ
-
-        Роль alert, а не status: сбой — это событие, о котором нужно узнать
-        немедленно, и как у списка ошибок валидации. role="status" вообще
-        не должен использоваться для сообщений, требующих реакции.
-
-        Текст берётся из config/content.php (mail_failed) и никогда не
-        содержит причины сбоя: адрес SMTP-сервера, логин и текст ошибки
-        транспорта посетителю не нужны и не должны просачиваться с самой
-        страницы. Подробности пишет контроллер только в серверный лог.
-    --}}
-    @if (filled($mailError))
-        <p
-            id="contact-form-mail-error"
-            data-form-result
-            role="alert"
-            tabindex="-1"
-            class="mt-6 rounded-control border border-danger bg-surface px-4 py-3 text-small text-danger"
-        >{{ $mailError }}</p>
-    @endif
-
-    @if ($errors->any())
-        <div
-            id="contact-form-errors"
-            data-form-result
-            role="alert"
-            tabindex="-1"
-            class="mt-6 rounded-control border border-danger bg-surface px-4 py-3"
-        >
-            <h3 class="text-small font-semibold text-ink">{{ $text['error_summary'] ?? '' }}</h3>
-
-            {{--
-                Ссылки ведут на поля с ошибками: их id совпадают с именами
-                полей (contact-name, contact-phone, contact-email,
-                contact-message, contact-consent), поэтому переход работает
-                и для текстовых полей, и для textarea, и для чекбокса.
-            --}}
-            <ul class="mt-2 space-y-1 text-small text-danger">
-                @foreach (array_keys($errors->getMessages()) as $invalidField)
-                    <li>
-                        <a href="#contact-{{ $invalidField }}" class="underline">
-                            {{ __('validation.attributes.'.$invalidField) }}
-                        </a>
-                    </li>
-                @endforeach
-            </ul>
-        </div>
-    @endif
+    <p
+        id="contact-form-mail-error"
+        data-form-result
+        role="alert"
+        tabindex="-1"
+        hidden
+        class="mt-6 rounded-control border border-danger bg-surface px-4 py-3 text-small text-danger"
+    >{{ $text['mail_failed'] ?? '' }}</p>
 
     <form
         method="POST"
-        action="{{ route('contacts.store') }}"
-        novalidate
+        action="{{ $endpoint }}"
+        data-contact-form
         class="relative mt-8"
     >
-        @csrf
-
         {{--
-            Ловушка для ботов. Поле называется нейтрально, чтобы автозаполнение
-            и «тупые» боты его заполняли, и при этом:
+            Служебные скрытые поля Web3Forms.
 
-              * вынесено за пределы экрана, а не скрыто через hidden или
-                display:none — такие поля боты пропускают;
-              * обёрнуто в aria-hidden, чтобы поле не читалось программами
-                доступности;
-              * tabindex="-1", чтобы при переходе с клавиатуры фокус на нём
-                не останавливался.
-
-            С обычным посетителем форма работает как всегда: пустое скрытое
-            поле не мешает ни заполнению, ни отправке.
+            access_key — идентификатор формы, значение берётся из окружения
+            при рендере, а не из Git. subject и from_name фиксированы и задают
+            тему и «имя отправителя» письма, которое владельцу соберёт сервис.
         --}}
-        <div aria-hidden="true" class="absolute left-[-9999px] top-0 h-px w-px overflow-hidden">
-            <label for="contact-website">{{ $text['honeypot_label'] ?? 'Сайт' }}</label>
-            <input
-                type="text"
-                id="contact-website"
-                name="{{ StoreContactRequest::HONEYPOT }}"
-                value=""
-                tabindex="-1"
-                autocomplete="off"
-                class="{{ $controlOk }}"
-            >
-        </div>
+        <input type="hidden" name="access_key" value="{{ $accessKey }}">
+        <input type="hidden" name="subject" value="Новая заявка с сайта Chicken site">
+        <input type="hidden" name="from_name" value="Chicken site">
 
         <div class="grid gap-5">
             @foreach ($textFields as $key => $meta)
                 @php
                     $field = (array) ($fields[$key] ?? []);
-                    $errorId = 'contact-'.$key.'-error';
                 @endphp
 
                 <div>
@@ -204,18 +146,12 @@
                         type="{{ $meta['type'] }}"
                         id="contact-{{ $key }}"
                         name="{{ $key }}"
-                        value="{{ old($key) }}"
                         placeholder="{{ $field['placeholder'] ?? '' }}"
-                        maxlength="{{ StoreContactRequest::limitFor($key) }}"
+                        maxlength="{{ $field['maxlength'] ?? '' }}"
                         autocomplete="{{ $meta['autocomplete'] }}"
-                        @class([$errors->has($key) ? $controlError : $controlOk])
-                        @if ($errors->has($key)) aria-invalid="true" aria-describedby="{{ $errorId }}" @endif
+                        class="{{ $controlOk }}"
                         @if ($meta['required'] ?? false) required aria-required="true" @endif
                     >
-
-                    @error($key)
-                        <p id="{{ $errorId }}" class="mt-1.5 text-small text-danger">{{ $message }}</p>
-                    @enderror
                 </div>
             @endforeach
 
@@ -229,16 +165,11 @@
                     name="message"
                     rows="5"
                     placeholder="{{ $fields['message']['placeholder'] ?? '' }}"
-                    maxlength="{{ StoreContactRequest::limitFor('message') }}"
+                    maxlength="{{ $fields['message']['maxlength'] ?? '' }}"
                     required
                     aria-required="true"
-                    @class([$errors->has('message') ? $controlError : $controlOk])
-                    @if ($errors->has('message')) aria-invalid="true" aria-describedby="contact-message-error" @endif
-                >{{ old('message') }}</textarea>
-
-                @error('message')
-                    <p id="contact-message-error" class="mt-1.5 text-small text-danger">{{ $message }}</p>
-                @enderror
+                    class="{{ $controlOk }}"
+                ></textarea>
             </div>
 
             {{--
@@ -246,8 +177,8 @@
                 конфиденциальности у проекта нет, и вести на несуществующий
                 адрес нельзя. Подпись связана с чекбоксом через for, чтобы её
                 можно было нажать. Поле обязательное, поэтому у него есть
-                required и aria-required="true" — без них диктор сообщил бы
-                о согласии только после отказа сервера.
+                required и aria-required="true". Отмеченное значение уходит в
+                Web3Forms полем consent.
             --}}
             <div>
                 <div class="flex items-start gap-3">
@@ -258,23 +189,13 @@
                         value="1"
                         required
                         aria-required="true"
-                        @checked(old('consent'))
-                        @class([
-                            'mt-0.5 h-5 w-5 shrink-0 rounded-control accent-primary',
-                            'border-line-strong' => ! $errors->has('consent'),
-                            'border-danger' => $errors->has('consent'),
-                        ])
-                        @if ($errors->has('consent')) aria-invalid="true" aria-describedby="contact-consent-error" @endif
+                        class="mt-0.5 h-5 w-5 shrink-0 rounded-control accent-primary border-line-strong"
                     >
 
                     <label for="contact-consent" class="text-small text-ink-muted">
                         {{ $text['consent'] ?? '' }}
                     </label>
                 </div>
-
-                @error('consent')
-                    <p id="contact-consent-error" class="mt-1.5 text-small text-danger">{{ $message }}</p>
-                @enderror
             </div>
 
             {{--

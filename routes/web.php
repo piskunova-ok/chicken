@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Http\Controllers\ContactMessageController;
 use App\Http\Controllers\ProductCategoryController;
 use App\Http\Controllers\ProductIndexController;
 use App\Http\Controllers\SitemapController;
@@ -62,22 +61,14 @@ Route::view('/quality', 'site.quality')->name('quality');
 Route::view('/contacts', 'site.contacts')->name('contacts');
 
 /*
-| Приём формы обратной связи с той же страницы.
-|
-| Имя contacts.store отличается от contacts (это GET выше), поэтому адрес
-| страницы и обработчик не путаются при обращении по имени.
-|
-| throttle:5,1 — пять отправок в минуту с одного IP. Контактная форма не
-| требует частых повторов, а лимит снимает самый простой спам. Счётчик
-| ведётся по IP вместе с адресом маршрута, поэтому отправка формы не
-| расходует лимит страниц каталога, а при превышении Laravel отвечает
-| честным 429, а не редиректом: притворяться, что всё прошло, было бы
-| враньём посетителю. То же число повторяется в tests/Feature/
-| ContactFormTest.php, и тест падает, если лимит поменяют здесь.
+| Форма обратной связи серверным маршрутом не обрабатывается: заявка
+| уходит POST-запросом прямо из браузера в Web3Forms
+| (https://api.web3forms.com/submit). Бесплатный тариф Web3Forms принимает
+| только запросы с origin браузера, серверные запросы он отклоняет (403),
+| поэтому маршрут contacts.store намеренно отсутствует. Форма читает
+| access key из config/services.php и несёт его скрытым полем в HTML —
+| это идентификатор формы, а не секрет.
 */
-Route::post('/contacts', [ContactMessageController::class, 'store'])
-    ->middleware('throttle:5,1')
-    ->name('contacts.store');
 
 /*
 | Карта сайта для поисковых систем: /sitemap.xml.

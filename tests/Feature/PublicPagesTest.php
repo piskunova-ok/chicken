@@ -374,10 +374,10 @@ final class PublicPagesTest extends TestCase
         $html = $this->get('/contacts')->assertOk()->getContent();
 
         $this->assertStringContainsString('<form', $html);
-        $this->assertStringContainsString('action="'.route('contacts.store').'"', $html);
+        $this->assertStringContainsString('action="https://api.web3forms.com/submit"', $html);
 
-        // При этом форма обычная, без Livewire: публичный сайт не тянет
-        // клиентский JS, и обещать интерактивную отправку было бы враньём.
+        // Форма уходит прямо в Web3Forms и обрабатывается обычным
+        // клиентским JavaScript, без Livewire.
         $this->assertStringNotContainsString('wire:submit', $html);
     }
 
