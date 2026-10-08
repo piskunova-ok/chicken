@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Http\Controllers\ContactMessageController;
 use App\Http\Requests\StoreContactRequest;
-use App\Mail\ContactFormMail;
 use Database\Seeders\ProductCatalogSeeder;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -38,21 +38,21 @@ use Tests\TestCase;
  *    помечены, а результат отправки — успех или ошибка — получает фокус.
  * 7. CSRF не сломан: POST-маршрут остаётся в группе web вместе со
  *    стандартным middleware Laravel.
- * 8. Заявка уходит ровно одним HTTPS-запросом к API Resend: получатель,
- *    отправитель и тема берутся из конфигурации, поля формы попадают в
- *    экранированный HTML, а неверно заполненная форма не делает запроса.
+ * 8. Заявка уходит ровно одним POST-запросом к API Web3Forms: access key
+ *    берётся из конфигурации, тема и имя отправителя фиксированы, поля
+ *    формы (имя, телефон, сообщение) передаются дословно, а неверно
+ *    заполненная форма не делает запроса.
  * 9. Сбой API (отказ или недоступность) показывает посетителю понятное
  *    сообщение и ни в коем случае не технические подробности.
  * 10. Письмо не оставляет следа в базе: ни новой таблицы, ни новой записи.
  *
  * ЧТО ЗДЕСЬ НЕ ПРОВЕРЯЕТСЯ
  *
- * Реальный API Resend тестом не вызывается: Http::fake() подменяет
+ * Реальный API Web3Forms тестом не вызывается: Http::fake() подменяет
  * встроенный HTTP-клиент, и по сети ничего не уходит. Проверяется то, что
  * контроллер сформировал и направил правильный HTTPS-запрос — адрес,
- * метод, ключ в заголовке Authorization и поля письма в теле. Подлинность
- * ключа, лимиты Resend и физическая доставка письма остаются за пределами
- * теста.
+ * метод, access key и поля заявки в теле. Доставка письма владельцу
+ * происходит внутри аккаунта Web3Forms и остаётся за пределами теста.
  *
  * Само срабатывание CSRF тоже не проверяется запросом: Laravel пропускает
  * его во время runningUnitTests(), поэтому тест на middleware-конфигурацию
@@ -72,6 +72,11 @@ final class ContactFormTest extends TestCase
      * сам тест превышения лимита, поэтому молча разъехаться они не смогут.
      */
     private const RATE_LIMIT = 5;
+
+    /**
+     * Эндпоинт API Web3Forms.
+     */
+    private const WEB3FORMS_ENDPOINT = 'https://api.web3forms.com/submit';
 
     protected function setUp(): void
     {
@@ -274,7 +279,7 @@ final class ContactFormTest extends TestCase
         }
 
         // Сообщение об успехе видно после правильно заполненной формы.
-        Http::fake();
+        $this->fakeSuccessfulSubmission();
 
         $this->from('/contacts')
             ->followingRedirects()
@@ -304,7 +309,7 @@ final class ContactFormTest extends TestCase
 
     public function test_a_correct_submission_shows_the_success_message(): void
     {
-        Http::fake();
+        $this->fakeSuccessfulSubmission();
 
         $response = $this->post('/contacts', $this->validPayload());
 
@@ -321,7 +326,7 @@ final class ContactFormTest extends TestCase
 
     public function test_the_status_message_states_that_the_message_was_sent_without_any_technical_details(): void
     {
-        Http::fake();
+        $this->fakeSuccessfulSubmission();
 
         $response = $this->post('/contacts', $this->validPayload());
 
@@ -348,7 +353,7 @@ final class ContactFormTest extends TestCase
 
     public function test_the_submitted_values_are_not_reflected_back_after_a_correct_submission(): void
     {
-        Http::fake();
+        $this->fakeSuccessfulSubmission();
 
         $this->post('/contacts', $this->validPayload());
 
@@ -515,7 +520,7 @@ final class ContactFormTest extends TestCase
 
     public function test_the_success_message_can_receive_the_focus(): void
     {
-        Http::fake();
+        $this->fakeSuccessfulSubmission();
 
         $html = (string) $this->from('/contacts')
             ->followingRedirects()
@@ -615,7 +620,7 @@ final class ContactFormTest extends TestCase
 
     public function test_an_empty_honeypot_does_not_interfere_with_a_real_submission(): void
     {
-        Http::fake();
+        $this->fakeSuccessfulSubmission();
 
         $this->post('/contacts', $this->validPayload(['website' => '']))
             ->assertRedirect(route('contacts'))
@@ -624,7 +629,7 @@ final class ContactFormTest extends TestCase
 
     public function test_the_rate_limit_answers_429_after_five_submissions(): void
     {
-        Http::fake();
+        $this->fakeSuccessfulSubmission();
 
         for ($attempt = 1; $attempt <= self::RATE_LIMIT; $attempt++) {
             $this->post('/contacts', $this->validPayload())
@@ -639,7 +644,7 @@ final class ContactFormTest extends TestCase
 
     public function test_the_rate_limit_is_shared_by_the_whole_contact_form(): void
     {
-        Http::fake();
+        $this->fakeSuccessfulSubmission();
         // Лимит считается по адресу маршрута, а не по странице просмотра:
         // открытие /contacts не расходует попытки отправки.
         $this->get('/contacts')->assertOk();
@@ -653,12 +658,12 @@ final class ContactFormTest extends TestCase
     }
 
     // ------------------------------------------------------------------
-    // 6. Отправка через API Resend и база данных
+    // 6. Пересылка через Web3Forms и база данных
     // ------------------------------------------------------------------
 
     public function test_a_submission_creates_no_table_and_writes_no_record(): void
     {
-        Http::fake();
+        $this->fakeSuccessfulSubmission();
 
         $before = $this->databaseSnapshot();
 
@@ -673,7 +678,7 @@ final class ContactFormTest extends TestCase
 
     public function test_a_submission_does_not_create_a_requests_table(): void
     {
-        Http::fake();
+        $this->fakeSuccessfulSubmission();
 
         $tables = array_map(strtolower(...), Schema::getTableListing());
 
@@ -689,9 +694,9 @@ final class ContactFormTest extends TestCase
         }
     }
 
-    public function test_a_correct_submission_posts_exactly_one_email_to_the_resend_api(): void
+    public function test_a_correct_submission_posts_exactly_one_submission_to_web3forms(): void
     {
-        Http::fake();
+        $this->fakeSuccessfulSubmission();
 
         $this->post('/contacts', $this->validPayload())
             ->assertRedirect(route('contacts'))
@@ -706,33 +711,27 @@ final class ContactFormTest extends TestCase
         $request = $requests[0][0];
 
         $this->assertSame('POST', $request->method());
-        $this->assertSame('https://api.resend.com/emails', $request->url());
+        $this->assertSame('https://api.web3forms.com/submit', $request->url());
 
-        // Ключ уходит только в заголовок Authorization и берётся из
-        // конфигурации services.resend, а не из кода.
-        $this->assertTrue($request->hasHeader('Authorization', 'Bearer '.config('services.resend.key')));
-
-        // Адреса читаются из той же конфигурации, что и в контроллере. Тест
-        // не хранит их отдельно: иначе смена адреса в окружении здесь бы не
-        // заметилась, а письмо поехало бы не туда.
+        // Access key живёт в теле запроса и берётся из той же конфигурации
+        // services.web3forms, что и в контроллере. Тест не хранит его
+        // отдельно: иначе смена ключа в окружении здесь бы не заметилась.
         $payload = $request->data();
 
-        $this->assertSame((string) config('services.resend.from'), $payload['from']);
-        $this->assertSame([(string) config('services.resend.to')], $payload['to']);
-        $this->assertNotSame('', (string) config('services.resend.to'), 'Получатель берётся из CONTACT_MAIL_TO.');
-        $this->assertSame(ContactFormMail::SUBJECT, $payload['subject']);
+        $this->assertNotSame('', (string) config('services.web3forms.access_key'), 'Access key берётся из WEB3FORMS_ACCESS_KEY.');
+        $this->assertSame((string) config('services.web3forms.access_key'), $payload['access_key']);
+        $this->assertSame(ContactMessageController::SUBJECT, $payload['subject']);
+        $this->assertSame(ContactMessageController::FROM_NAME, $payload['from_name']);
 
-        $body = $payload['html'];
-
-        $this->assertStringContainsString('Иван Петров', $body);
-        $this->assertStringContainsString('+7 900 000-00-00', $body);
-        $this->assertStringContainsString('ivan@example.org', $body);
-        $this->assertStringContainsString('Подскажите, какие позиции есть в наличии.', $body);
+        // Поля формы передаются дословно: письмо собирает сам сервис.
+        $this->assertSame('Иван Петров', $payload['name']);
+        $this->assertSame('+7 900 000-00-00', $payload['phone']);
+        $this->assertSame('Подскажите, какие позиции есть в наличии.', $payload['message']);
     }
 
-    public function test_a_correct_submission_escapes_user_input_in_the_email_body(): void
+    public function test_a_correct_submission_passes_user_input_verbatim_to_the_api(): void
     {
-        Http::fake();
+        $this->fakeSuccessfulSubmission();
 
         $this->post('/contacts', $this->validPayload([
             'name' => 'Иван <b>Петров</b>',
@@ -741,15 +740,10 @@ final class ContactFormTest extends TestCase
 
         $payload = Http::recorded()[0][0]->data();
 
-        $body = $payload['html'];
-
-        // Ввод посетителя не должен превратиться в разметку письма: теги
-        // экранируются как текст, а не исполняются. Русские кавычки тегами
-        // не являются и остаются как есть.
-        $this->assertStringNotContainsString('<b>Петров</b>', $body);
-        $this->assertStringContainsString('Иван &lt;b&gt;Петров&lt;/b&gt;', $body);
-        $this->assertStringContainsString('Зайти «сегодня» &amp; посчитать &lt;5 позиций', $body);
-        $this->assertStringNotContainsString('<5 позиций', $body);
+        // Web3Forms собирает письмо сам, поэтому приложение передаёт текст
+        // как есть — разметки оно не создаёт и ничего не экранирует.
+        $this->assertSame('Иван <b>Петров</b>', $payload['name']);
+        $this->assertSame('Зайти «сегодня» & посчитать <5 позиций', $payload['message']);
     }
 
     public function test_an_invalid_submission_posts_nothing_and_reports_validation_errors(): void
@@ -772,13 +766,15 @@ final class ContactFormTest extends TestCase
     public function test_a_rejected_response_from_the_api_shows_a_plain_error_instead_of_a_success(): void
     {
         // API отвечает отказом — так же, как это случилось бы при неверном
-        // ключе или превышении лимита запросов. Сырой ответ не должен дойти
-        // до посетителя.
+        // access key или превышении лимита запросов. Сырой ответ не должен
+        // дойти до посетителя.
+        config(['services.web3forms.access_key' => 're_web3forms_secret_marker']);
+
         Http::fake([
-            'https://api.resend.com/emails' => Http::response([
-                'statusCode' => 401,
-                'message' => 'API key is invalid.',
-            ], 401),
+            'https://api.web3forms.com/submit' => Http::response([
+                'success' => false,
+                'message' => 'Access key is invalid.',
+            ], 403),
         ]);
 
         $response = $this->post('/contacts', $this->validPayload());
@@ -807,14 +803,31 @@ final class ContactFormTest extends TestCase
             'Ошибка отправки должна получать фокус после отправки.',
         );
 
-        // Ни адреса API, ни статуса, ни текста ответа на странице нет:
+        // Ни адреса API, ни текста ответа, ни Access Key на странице нет:
         // всё это относится к серверу, а не к посетителю.
-        foreach (['api.resend.com', 'API key is invalid', 'statusCode', 'invalid'] as $secret) {
+        foreach (['api.web3forms.com', 'Access key is invalid', 're_web3forms_secret_marker'] as $secret) {
             $this->assertStringNotContainsString($secret, $html, 'Страница не должна показывать технические подробности.');
         }
 
         // Запрос к API всё же ушёл — услуга ответила отказом.
         Http::assertSentCount(1);
+    }
+
+    public function test_a_response_without_success_true_is_treated_as_a_failure_even_on_http_200(): void
+    {
+        // Успехом считается только success=true, поэтому решает флаг, а не
+        // код ответа: HTTP 200 без подтверждения — такой же сбой.
+        Http::fake([
+            'https://api.web3forms.com/submit' => Http::response([
+                'success' => false,
+                'message' => 'The selected "email" is invalid.',
+            ]),
+        ]);
+
+        $this->post('/contacts', $this->validPayload())
+            ->assertRedirect(route('contacts'))
+            ->assertSessionHas(StoreContactRequest::ERROR_KEY, (string) config('content.contact_form.mail_failed'))
+            ->assertSessionMissing(StoreContactRequest::STATUS_KEY);
     }
 
     public function test_a_connection_error_to_the_api_shows_a_plain_error_instead_of_a_success(): void
@@ -823,8 +836,8 @@ final class ContactFormTest extends TestCase
         // ошибку, что и при HTTP-отказе: причины делятся на серверные, а не
         // на «HTTP против сети».
         Http::fake([
-            'https://api.resend.com/emails' => static function (): never {
-                throw new ConnectionException('Connection to api.resend.com failed.');
+            'https://api.web3forms.com/submit' => static function (): never {
+                throw new ConnectionException('Connection to api.web3forms.com failed.');
             },
         ]);
 
@@ -834,11 +847,11 @@ final class ContactFormTest extends TestCase
             ->assertSessionMissing(StoreContactRequest::STATUS_KEY);
     }
 
-    public function test_a_delivery_failure_never_writes_the_api_key_to_the_log(): void
+    public function test_a_delivery_failure_never_writes_the_access_key_to_the_log(): void
     {
-        // Ключ берётся из окружения. Кладём в него метку и смотрим, не
-        // утащил ли кто-нибудь её в лог вместе с текстом ошибки.
-        config(['services.resend.key' => 're_secret_metka_kotoruyu_nelzya_logirovat']);
+        // Access key берётся из окружения. Кладём в него метку и смотрим,
+        // не утащил ли кто-нибудь её в лог вместе с текстом ошибки.
+        config(['services.web3forms.access_key' => 're_web3forms_secret_metka_kotoruyu_nelzya_logirovat']);
 
         $logged = [];
 
@@ -847,10 +860,10 @@ final class ContactFormTest extends TestCase
         });
 
         Http::fake([
-            'https://api.resend.com/emails' => Http::response([
-                'statusCode' => 401,
-                'message' => 'API key is invalid.',
-            ], 401),
+            'https://api.web3forms.com/submit' => Http::response([
+                'success' => false,
+                'message' => 'Access key is invalid.',
+            ], 403),
         ]);
 
         $this->post('/contacts', $this->validPayload());
@@ -861,9 +874,9 @@ final class ContactFormTest extends TestCase
             $haystack = $entry->message.' '.json_encode($entry->context, JSON_UNESCAPED_UNICODE);
 
             $this->assertStringNotContainsString(
-                're_secret_metka_kotoruyu_nelzya_logirovat',
+                're_web3forms_secret_metka_kotoruyu_nelzya_logirovat',
                 $haystack,
-                'Лог не должен содержать ключ API.',
+                'Лог не должен содержать access key.',
             );
         }
 
@@ -871,15 +884,15 @@ final class ContactFormTest extends TestCase
         // оператору, чтобы найти причину.
         $failures = array_values(array_filter(
             $logged,
-            static fn (MessageLogged $event): bool => $event->message === 'contact_form: resend api rejected the email',
+            static fn (MessageLogged $event): bool => $event->message === 'contact_form: web3forms rejected the submission',
         ));
 
         $this->assertCount(1, $failures);
-        $this->assertSame(401, $failures[0]->context['status'] ?? null);
-        $this->assertSame('API key is invalid.', $failures[0]->context['error'] ?? null);
+        $this->assertSame(403, $failures[0]->context['status'] ?? null);
+        $this->assertSame('Access key is invalid.', $failures[0]->context['error'] ?? null);
     }
 
-    public function test_a_rejected_submission_sends_no_mail(): void
+    public function test_a_rejected_submission_posts_nothing(): void
     {
         $this->post('/contacts', $this->validPayload(['email' => 'не адрес']));
 
@@ -902,6 +915,21 @@ final class ContactFormTest extends TestCase
     // ------------------------------------------------------------------
     // Вспомогательное
     // ------------------------------------------------------------------
+
+    /**
+     * Заглушка успешного ответа Web3Forms.
+     *
+     * Голый Http::fake() отвечает пустым 200, а успехом контроллер считает
+     * только success=true в теле ответа — без него все «успешные» тесты
+     * уходили бы в ветку ошибки. Конкретный ответ говорит тесту настоящую
+     * интонацию API: «заявка принята».
+     */
+    private function fakeSuccessfulSubmission(): void
+    {
+        Http::fake([
+            self::WEB3FORMS_ENDPOINT => Http::response(['success' => true]),
+        ]);
+    }
 
     /**
      * Корректно заполненная форма с возможностью точечной правки.
