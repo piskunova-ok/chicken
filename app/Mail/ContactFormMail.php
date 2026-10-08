@@ -4,23 +4,17 @@ declare(strict_types=1);
 
 namespace App\Mail;
 
-use Illuminate\Bus\Queueable;
-use Illuminate\Mail\Mailable;
-use Illuminate\Mail\Mailables\Content;
-use Illuminate\Mail\Mailables\Envelope;
-use Illuminate\Queue\SerializesModels;
-
 /**
- * Уведомление о заявке, пришедшей с формы обратной связи (/contacts).
+ * Содержимое письма для Resend API.
  *
- * КТО ПОЛУЧАЕТ ПИСЬМО
+ * РАНЬШЕ ЭТО БЫЛ MAILABLE, ТЕПЕРЬ — НЕТ
  *
- * Адрес получателя берётся из config('mail.to') = env('CONTACT_MAIL_TO') и
- * передаётся в момент отправки через Mail::to(...) в контроллере. Сам класс
- * адреса не знает: хардкод означал бы, что смена получателя требует правки
- * кода и нового деплоя, а адрес, попавший в репозиторий, утечёт вместе с
- * ним. Отправитель (from) берётся из config/mail.php — MAIL_FROM_ADDRESS и
- * MAIL_FROM_NAME, поэтому здесь он тоже не продублирован.
+ * Письмо уходит через HTTPS API Resend (POST api.resend.com/emails), а не
+ * через laravel.mailer: на хостинге заблокированы исходящие SMTP-порты.
+ * Класс поэтому не наследует Illuminate\Mail\Mailable, а просто собирает
+ * тему и экранированный HTML письма, которые контроллер кладёт в JSON-
+ * запрос к API. Такое разделение честнее: отправка (HTTP) живёт в
+ * контроллере, а «что будет в письме» — здесь.
  *
  * ПОЧЕМУ ТЕЛО СОБИРАЕТСЯ В КОДЕ, А НЕ В BLADE
  *
@@ -30,20 +24,19 @@ use Illuminate\Queue\SerializesModels;
  * заказчик не заказывал. Тело собирается здесь и экранируется через e(),
  * поэтому сообщение посетителя не может превратиться в разметку письма.
  *
- * ПОЧЕМУ ОТПРАВКА СИНХРОННАЯ, А НЕ В ОЧЕРЕДИ
+ * КТО ОТПРАВИТЕЛЬ И КТО ПОЛУЧАТЕЛЬ
  *
- * Письмо одно, отправка одна, и посетитель должен узнать результат сразу:
- * после редиректа он видит либо «сообщение отправлено», либо понятную
- * ошибку. Отложенная отправка увела бы результат за пределы запроса, а
- * для контактной формы задержка в пару секунд от SMTP неважна.
+ * Ни тот, ни другой на месте не пишутся: отправитель (RESEND_FROM_EMAIL)
+ * и получатель (CONTACT_MAIL_TO) приходят из конфигурации services.resend
+ * и попадают в запрос в контроллере. Хардкод означал бы, что смена адреса
+ * требует правки кода и нового деплоя, а адрес, попавший в репозиторий,
+ * однажды утечёт вместе с ним.
  *
- * Пароль SMTP класс не видит и не логирует: он живёт в окружении и в
- * config/mail.php и в код формы не попадает.
+ * КЛЮЧ API Класс не видит и не логирует: он живёт в окружении
+ * (RESEND_API_KEY), в services.resend, и в код письма не попадает.
  */
-final class ContactFormMail extends Mailable
+final class ContactFormMail
 {
-    use Queueable, SerializesModels;
-
     /**
      * Тема письма.
      *
@@ -69,23 +62,7 @@ final class ContactFormMail extends Mailable
     }
 
     /**
-     * Конверт: тема письма.
-     */
-    public function envelope(): Envelope
-    {
-        return new Envelope(subject: self::SUBJECT);
-    }
-
-    /**
-     * Тело письма: готовый HTML без шаблона.
-     */
-    public function content(): Content
-    {
-        return new Content(htmlString: $this->buildBody());
-    }
-
-    /**
-     * Собрать тело уведомления.
+     * Экран-скопированное HTML-тело письма.
      *
      * Порядок полей совпадает с порядком в форме, поэтому владелец читает
      * письмо так же, как посетитель заполнял заявку. Пустая почта
@@ -95,7 +72,7 @@ final class ContactFormMail extends Mailable
      * переносы строк превращаются в <br>. В обратном порядке экранирование
      * сломало бы разметку.
      */
-    private function buildBody(): string
+    public function html(): string
     {
         $rows = [
             'Имя' => $this->name,
