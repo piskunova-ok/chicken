@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\ProductCategoryController;
 use App\Http\Controllers\ProductIndexController;
+use App\Http\Controllers\QualityController;
 use App\Http\Controllers\SitemapController;
 use Illuminate\Support\Facades\Route;
 
@@ -58,7 +59,13 @@ Route::get('/products', [ProductIndexController::class, 'index'])->name('product
 | Поэтому это обычные представления без контроллера — так же, как главная.
 */
 Route::view('/about', 'site.about')->name('about');
-Route::view('/quality', 'site.quality')->name('quality');
+/*
+| Страница «Качество» собирает тексты из config/content.php и сертификаты из
+| базы, поэтому у неё есть контроллер (QualityController), а не Route::view.
+| Имя маршрута quality не изменилось, поэтому пункты шапки и подвала
+| остались ссылками без правок разметки.
+*/
+Route::get('/quality', [QualityController::class, 'index'])->name('quality');
 Route::view('/contacts', 'site.contacts')->name('contacts');
 
 /*

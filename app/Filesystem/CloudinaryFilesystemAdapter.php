@@ -543,6 +543,11 @@ final class CloudinaryFilesystemAdapter implements FilesystemAdapter
             'heif' => 'image/heif',
             'tiff' => 'image/tiff',
             'tif' => 'image/tiff',
+            // Документы о качестве: Cloudinary принимает PDF под тем же
+            // ресурсным типом image и отдаёт оригинал по адресу …/<id>.pdf
+            // (см. QualityCertificate). Без этой записи mimeType() бросал
+            // UnableToRetrieveMetadata на PDF-файле, хотя байты на месте.
+            'pdf' => 'application/pdf',
         ];
 
         return isset($mimeTypes[$format]) ? $mimeTypes[$format] : null;

@@ -23,6 +23,11 @@
     $intro = (array) config('content.intro', []);
     $lifestyle = (array) config('content.lifestyle', []);
 
+    // Активные сертификаты приходят из QualityController. Если представление
+    // рендерится напрямую (например, в изоляции), коллекция пустая и блок
+    // не выводится — страница не падает и не показывает пустой заголовок.
+    $certificates = $certificates ?? collect();
+
     $breadcrumbs = [
         ['label' => 'Главная', 'url' => route('home')],
         ['label' => 'Качество', 'url' => null],
@@ -106,6 +111,61 @@
             @endforeach
         </ol>
     </x-section>
+
+    {{-- ======================== СЕРТИФИКАТЫ ======================== --}}
+    {{--
+        Документы о качестве, загруженные владельцем в админке. Блок
+        выводится, только когда есть хотя бы один активный документ: пустого
+        заголовка «Сертификаты» на странице быть не должно, потому что до
+        загрузки документов их у компании нет и утверждать обратное нельзя.
+
+        Изображение (скан) показывается картинкой, PDF — плиткой со ссылкой:
+        PDF браузер не отрисует как картинку, а открыть его посетитель должен
+        одним кликом.
+    --}}
+    @if ($certificates->isNotEmpty())
+        <x-section tone="surface" spacing="default">
+            <x-section-heading
+                eyebrow="Подтверждено документами"
+                title="Сертификаты и документы"
+                lead="Скан-копии документов, подтверждающих соответствие продукции."
+                align="center"
+            />
+
+            <ul class="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                @foreach ($certificates as $certificate)
+                    <li class="flex h-full flex-col overflow-hidden rounded-card border border-line bg-canvas">
+                        <a
+                            href="{{ $certificate->fileUrl() }}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="group flex h-full flex-col no-underline"
+                        >
+                            @if ($certificate->isPdf())
+                                <span class="flex aspect-[3/4] w-full items-center justify-center bg-surface font-hand text-h2 text-primary">
+                                    PDF
+                                </span>
+                            @else
+                                <img
+                                    src="{{ $certificate->fileUrl() }}"
+                                    alt="{{ $certificate->title }}"
+                                    loading="lazy"
+                                    class="aspect-[3/4] w-full object-cover"
+                                >
+                            @endif
+
+                            <span class="flex flex-1 flex-col p-5">
+                                <span class="text-body font-semibold text-ink">{{ $certificate->title }}</span>
+                                <span class="mt-2 text-small text-primary transition-colors duration-200 group-hover:text-primary-dark">
+                                    Открыть документ
+                                </span>
+                            </span>
+                        </a>
+                    </li>
+                @endforeach
+            </ul>
+        </x-section>
+    @endif
 
     {{-- ========================= LIFESTYLE ========================== --}}
     {{--

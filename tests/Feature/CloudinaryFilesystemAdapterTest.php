@@ -408,6 +408,64 @@ class CloudinaryFilesystemAdapterTest extends TestCase
     }
 
     /**
+     * PDF-документ (сертификат качества) отдаётся с собственным форматом:
+     * Cloudinary хранит его под ресурсным типом image и отдаёт оригинал по
+     * адресу …/<public_id>.pdf, без преобразования формата.
+     */
+    public function test_a_pdf_path_is_delivered_with_its_own_format(): void
+    {
+        $config = $this->diskConfig(true);
+        $adapter = new CloudinaryFilesystemAdapter($config);
+        $storage = $this->storage($adapter, $config);
+
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/certificates/cld-sample.pdf',
+            $storage->url('certificates/cld-sample.pdf'),
+        );
+    }
+
+    /**
+     * PDF-путь обязан сообщать MIME-тип application/pdf, иначе mimeType()
+     * бросал бы UnableToRetrieveMetadata (см. QualityCertificate).
+     */
+    public function test_a_pdf_path_reports_the_pdf_mime_type(): void
+    {
+        $adapter = new CloudinaryFilesystemAdapter($this->diskConfig(true));
+
+        $this->assertSame(
+            'application/pdf',
+            $adapter->mimeType('certificates/cld-sample.pdf')->mimeType(),
+        );
+    }
+
+    /**
+     * Загрузка PDF: в Cloudinary уходит public_id без расширения, а сам файл
+     * остаётся PDF-ом (формат возвращает Upload API).
+     */
+    public function test_a_pdf_upload_uses_a_public_id_without_the_extension(): void
+    {
+        $config = $this->diskConfig(true);
+        $adapter = new CloudinaryFilesystemAdapter($config);
+
+        $uploadApi = $this->createMock(UploadApi::class);
+        $uploadApi->expects($this->once())
+            ->method('upload')
+            ->with(
+                $this->isString(),
+                $this->callback(
+                    static fn (array $options): bool => ($options['public_id'] ?? null) === 'certificates/cld-sample'
+                )
+            )
+            ->willReturn(['public_id' => 'certificates/cld-sample', 'format' => 'pdf']);
+
+        $this->injectClient($adapter, $this->clientWith($uploadApi));
+
+        $storage = $this->storage($adapter, $config);
+
+        $this->assertTrue($storage->put('certificates/cld-sample.pdf', $this->contentStream('%PDF-1.7')));
+    }
+
+    /**
      * Удаление обязано бить по тому же public_id без расширения: именно под ним
      * ассет и был загружен.
      */
