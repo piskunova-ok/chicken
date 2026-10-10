@@ -1,58 +1,279 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Chicken — сайт производителя куриной продукции
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Современный адаптивный сайт для производителя куриной продукции с удобной административной панелью.
 
-## About Laravel
+Проект создан как учебный кейс по вайб-кодингу с использованием OpenCode, Laravel, Filament, ChatGPT и современных облачных сервисов.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## О проекте
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Сайт предназначен для компании, которая продаёт:
 
-## Learning Laravel
+- яйца кур;
+- мясо кур;
+- куриные тушки;
+- окорочка;
+- бёдра;
+- сердца;
+- печень;
+- суповые наборы;
+- другие виды продукции.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+Основная задача проекта — сделать не просто красивый сайт, а систему, которой владелец бизнеса может управлять самостоятельно через административную панель.
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+Пользователю не нужно работать с кодом, GitHub или сервером.
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+---
 
-## Agentic Development
+## Что реализовано
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+### Публичная часть сайта
 
-```bash
-composer require laravel/boost --dev
+- адаптивный дизайн;
+- главная страница;
+- каталог продукции;
+- отдельные категории товаров;
+- карточки продукции;
+- страница «Качество»;
+- контактная информация;
+- режим работы;
+- форма обратной связи;
+- логотип компании;
+- сертификаты соответствия;
+- поддержка мобильных устройств.
 
-php artisan boost:install
-```
+---
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+## Административная панель
 
-## Contributing
+Для управления сайтом используется Filament.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Через админ-панель пользователь может:
 
-## Code of Conduct
+- создавать товары;
+- редактировать товары;
+- удалять товары;
+- менять название и описание;
+- выбирать категорию;
+- включать и скрывать товары;
+- загружать и заменять фотографии;
+- управлять категориями;
+- менять контакты;
+- менять адрес;
+- менять режим работы;
+- менять email и телефоны;
+- указывать Telegram, WhatsApp и VK;
+- загружать и менять логотип;
+- добавлять сертификаты;
+- загружать изображения и PDF сертификатов;
+- менять порядок отображения сертификатов;
+- включать и скрывать сертификаты.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+---
 
-## Security Vulnerabilities
+## Работа с изображениями
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Пользовательские изображения хранятся в Cloudinary.
 
-## License
+Это позволяет:
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+- загружать фотографии через админку;
+- не терять изображения после повторного deploy;
+- хранить файлы независимо от Render;
+- заменять и удалять изображения без работы с Git.
+
+Старые локальные изображения также продолжают поддерживаться.
+
+---
+
+## Форма обратной связи
+
+Форма содержит поля:
+
+- имя;
+- телефон;
+- сообщение.
+
+Заявки отправляются через Web3Forms и приходят на email владельца сайта.
+
+---
+
+## Страница «Качество»
+
+На странице можно выводить сертификаты соответствия.
+
+Через админку пользователь может:
+
+- добавить сертификат;
+- указать название;
+- загрузить изображение;
+- загрузить PDF;
+- включить или отключить показ;
+- изменить порядок отображения.
+
+---
+
+## Технологии
+
+Проект использует:
+
+- PHP;
+- Laravel 13;
+- Filament 5;
+- PostgreSQL;
+- Blade;
+- JavaScript;
+- Vite;
+- Docker;
+- Render;
+- Aiven PostgreSQL;
+- Cloudinary;
+- Web3Forms;
+- Git;
+- GitHub.
+
+---
+
+## Архитектура проекта
+
+Основные части проекта:
+
+- Laravel — серверная логика;
+- Filament — административная панель;
+- PostgreSQL — база данных;
+- Cloudinary — хранение изображений и файлов;
+- Web3Forms — отправка заявок;
+- Render — размещение сайта;
+- Aiven — production-база данных.
+
+---
+
+## База данных
+
+В базе данных хранятся:
+
+- товары;
+- категории;
+- настройки сайта;
+- пользователи админки;
+- сертификаты качества;
+- служебные данные Laravel.
+
+---
+
+## Настройки сайта
+
+Через раздел «Настройки сайта» можно менять:
+
+- название компании;
+- краткое описание;
+- основной телефон;
+- дополнительный телефон;
+- email;
+- адрес;
+- режим работы;
+- Telegram;
+- WhatsApp;
+- VK;
+- логотип компании.
+
+---
+
+## Безопасность
+
+В проекте:
+
+- секретные ключи не хранятся в Git;
+- настройки сервисов передаются через переменные окружения;
+- production-миграции запускаются безопасно;
+- не используется `migrate:fresh` на рабочей базе;
+- изображения не сохраняются на временной файловой системе Render;
+- доступ к административной панели ограничен.
+
+---
+
+## Тестирование
+
+В проекте используются автоматические тесты.
+
+Проверяются:
+
+- публичные страницы;
+- каталог;
+- категории;
+- карточки товаров;
+- изображения;
+- настройки сайта;
+- административная панель;
+- Cloudinary;
+- сертификаты;
+- sitemap;
+- форма обратной связи.
+
+На момент финальной сборки полный набор тестов проходит без ошибок.
+
+---
+
+## Деплой
+
+Production-версия работает на Render.
+
+База данных размещена в Aiven PostgreSQL.
+
+Пользовательские изображения и сертификаты хранятся в Cloudinary.
+
+---
+
+## Ссылка на сайт
+
+https://chicken-site.onrender.com
+
+---
+
+## Репозиторий
+
+https://github.com/piskunova-ok/chicken
+
+---
+
+## Автор
+
+**Пискунова Оксана**
+
+Учебный проект по вайб-кодингу.
+
+Инструменты:
+
+- OpenCode;
+- ChatGPT;
+- Canva;
+- GitHub.
+
+---
+
+## Что я отработала в этом проекте
+
+В процессе работы я практиковала:
+
+- составление технического задания;
+- создание промптов для разработки;
+- работу с Laravel-проектом;
+- настройку административной панели;
+- работу с базой данных;
+- подключение внешних API;
+- работу с Cloudinary;
+- настройку формы обратной связи;
+- работу с Render;
+- деплой;
+- диагностику ошибок;
+- чтение логов;
+- работу с Git и GitHub;
+- тестирование;
+- исправление production-ошибок.
+
+---
+
+## Статус проекта
+
+Проект завершён и готов к демонстрации как учебный кейс.
