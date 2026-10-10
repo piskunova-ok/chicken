@@ -17,8 +17,9 @@ use Tests\TestCase;
  * /contacts и их появления в навигации.
  *
  * Проверяется ровно то, что нужно для показа заказчику: страницы
- * отвечают 200, обзорная страница продукции перечисляет обе категории и
- * ведёт на них, а пункты шапки и подвала стали ссылками. Отдельно
+ * отвечают 200, обзорная страница продукции перечисляет обе известные
+ * категории (и категории, добавленные в админке) и ведёт на них, а пункты
+ * шапки и подвала стали ссылками. Отдельно
  * проверяется, что выдуманных данных на страницах нет: заглушки
  * [НАЗВАНИЕ КОМПАНИИ], [ТЕЛЕФОН] и [EMAIL] обязаны остаться на месте, а
  * не исчезнуть вместе с новыми страницами.
@@ -100,21 +101,24 @@ final class PublicPagesTest extends TestCase
         $response->assertSee(route('products.chicken'), false);
     }
 
-    public function test_the_products_page_shows_no_third_category(): void
+    public function test_the_products_page_shows_a_category_added_in_the_admin_panel(): void
     {
         // Категория добавлена в базу, но не описана в config/site.php.
-        // Показывать её нечем, поэтому на обзорной странице её быть не
-        // должно: молчаливый третий пункт был бы выдумкой интерфейса.
+        // Раньше её нечем было показать; теперь карточка строится из записи
+        // (название + описание), без фотографии, и ведёт на /products/{slug}.
         ProductCategory::create([
-            'name' => 'Категория без описания',
-            'slug' => 'net-takoy',
+            'name' => 'Перепелиные яйца',
+            'description' => 'Небольшая партия перепелиных яиц.',
+            'slug' => 'iz-bazy',
             'is_active' => true,
             'sort_order' => 9,
         ]);
 
         $this->get('/products')
             ->assertOk()
-            ->assertDontSee('Категория без описания');
+            ->assertSee('Перепелиные яйца')
+            ->assertSee('Небольшая партия перепелиных яиц.')
+            ->assertSee(route('products.category', ['categorySlug' => 'iz-bazy']), false);
     }
 
     public function test_an_inactive_category_disappears_from_the_products_page(): void

@@ -30,7 +30,7 @@
 @endphp
 
 <x-layouts.app
-    :title="($quality['page_title'] ?? 'Качество').' — '.config('site.name')"
+    :title="($quality['page_title'] ?? 'Качество').' — '.\App\Support\Settings::value('company_name')"
     :description="$quality['meta_description'] ?? null"
 >
     {{-- ============================ HERO ============================ --}}

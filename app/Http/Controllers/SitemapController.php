@@ -22,11 +22,13 @@ use Illuminate\Support\Facades\Route;
  *    шапке и подвале. Отдельный список страниц здесь означал бы вторую
  *    правду о сайте: добавили пункт в меню, а в карту он не попал.
  *
- * 2. Страницы категорий — из config/site.php (products), но только те,
- *    чей slug есть среди активных категорий в базе. Правило ровно то же,
- *    что на /products и в ProductCategoryController: неактивная категория
- *    для посетителя не существует, её страница отдаёт 404, и адрес такой
- *    страницы в карте был бы обещанием, которое сайт не выполняет.
+ * 2. Страницы категорий — из config/site.php (products) и из базы. В карту
+ *    попадают только адреса активных категорий: известных (eggs, chicken),
+ *    чьи маршруты живут в конфиге, и добавленных в админке, живущих по
+ *    общему маршруту products.category. Правило ровно то же, что на /products
+ *    и в ProductCategoryController: неактивная категория для посетителя не
+ *    существует, её страница отдаёт 404, и адрес такой страницы в карте был
+ *    бы обещанием, которое сайт не выполняет.
  *
  * ЧТО В КАРТУ НЕ ПОПАДАЕТ И ПОЧЕМУ
  *
@@ -85,20 +87,22 @@ final class SitemapController extends Controller
 
         $paths = [];
 
-        foreach ($this->staticPages() as $routeName) {
-            $paths[$routeName] = route($routeName, [], false);
-        }
-
-        foreach ($this->activeCategoryPages() as $routeName) {
-            $paths[$routeName] = route($routeName, [], false);
-        }
-
         /*
-         * Ключом служит имя маршрута, поэтому страница, попавшая в оба
-         * источника, добавляется один раз. Порядок при этом сохраняется
-         * первый встреченный: home, /products, /quality, /about, /contacts,
-         * затем страницы категорий.
+         * Ключом служит путь страницы (а не имя маршрута), поэтому один и
+         * тот же адрес, попавший в оба источника, добавляется один раз.
+         * Порядок при этом сохраняется первый встреченный: home, /products,
+         * /quality, /about, /contacts, затем страницы категорий.
          */
+        foreach ($this->staticPages() as $routeName) {
+            $path = route($routeName, [], false);
+
+            $paths[$path] = $path;
+        }
+
+        foreach ($this->activeCategoryPages() as $path) {
+            $paths[$path] = $path;
+        }
+
         return array_map(
             static fn (string $path): string => $root.$path,
             array_values($paths),
@@ -135,7 +139,7 @@ final class SitemapController extends Controller
     }
 
     /**
-     * Имена маршрутов страниц активных категорий.
+     * Пути страниц активных категорий.
      *
      * @return array<int, string>
      */
@@ -145,29 +149,40 @@ final class SitemapController extends Controller
          * Активные категории одним запросом, в том же порядке, что и на
          * /products: выдача страницы и выдача карты не должны расходиться.
          */
-        $activeSlugs = ProductCategory::query()
+        $active = ProductCategory::query()
             ->where('is_active', true)
             ->orderBy('sort_order')
             ->orderBy('id')
-            ->pluck('slug')
-            ->all();
+            ->get();
 
-        $names = [];
+        $configProducts = (array) config('site.products', []);
 
-        foreach ((array) config('site.products', []) as $slug => $product) {
-            if (! in_array($slug, $activeSlugs, true)) {
+        $paths = [];
+
+        foreach ($active as $category) {
+            $config = $configProducts[$category->slug] ?? null;
+
+            if (is_array($config)) {
+                /*
+                 * Известная категория: адрес из имени маршрута в конфиге.
+                 */
+                $routeName = $config['route'] ?? null;
+
+                if (! is_string($routeName) || ! Route::has($routeName)) {
+                    continue;
+                }
+
+                $paths[] = route($routeName, [], false);
+
                 continue;
             }
 
-            $routeName = $product['route'] ?? null;
-
-            if (! is_string($routeName) || ! Route::has($routeName)) {
-                continue;
-            }
-
-            $names[] = $routeName;
+            /*
+             * Категория из админки: общий маршрут products.category.
+             */
+            $paths[] = route('products.category', ['categorySlug' => $category->slug], false);
         }
 
-        return $names;
+        return array_values(array_unique($paths));
     }
 }

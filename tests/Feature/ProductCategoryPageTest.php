@@ -351,6 +351,61 @@ final class ProductCategoryPageTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // Категории, добавленные в админке: у них нет записи в config
+    // ------------------------------------------------------------------
+
+    public function test_a_category_added_in_the_admin_panel_opens_with_its_name_as_the_heading(): void
+    {
+        $this->createDatabaseCategory();
+
+        $response = $this->get('/products/iz-bazy')->assertOk();
+
+        // Оформления в config/catalog.php у неё нет, поэтому h1 — название
+        // из базы, а вводный абзац и мета-описание — колонка description.
+        $response->assertSee('<h1', false);
+        $response->assertSee('Перепелиные яйца');
+        $response->assertSee('Небольшая партия перепелиных яиц.', false);
+        $this->assertSame(1, substr_count($response->getContent(), '<h1'));
+    }
+
+    public function test_a_category_added_in_the_admin_panel_shows_its_own_products(): void
+    {
+        $category = $this->createDatabaseCategory();
+
+        $category->products()->create([
+            'name' => 'Яйцо перепелиное',
+            'slug' => 'egg-quail',
+            'short_description' => 'Десяток перепелиных яиц.',
+            'is_active' => true,
+            'sort_order' => 1,
+        ]);
+
+        $response = $this->get('/products/iz-bazy')->assertOk();
+
+        $this->assertSame(1, $this->cardCount($response->getContent()));
+        $response->assertSee('Яйцо перепелиное');
+        $this->assertStringNotContainsString('data-catalog-empty', $response->getContent());
+    }
+
+    public function test_an_empty_category_added_in_the_admin_panel_shows_the_empty_state(): void
+    {
+        $this->createDatabaseCategory();
+
+        $response = $this->get('/products/iz-bazy')->assertOk();
+
+        $this->assertSame(0, $this->cardCount($response->getContent()));
+        $response->assertSee('data-catalog-empty', false);
+        $response->assertSee(config('content.catalog.empty_text'), false);
+    }
+
+    public function test_an_inactive_category_added_in_the_admin_panel_returns_404(): void
+    {
+        $this->createDatabaseCategory(['is_active' => false]);
+
+        $this->get('/products/iz-bazy')->assertNotFound();
+    }
+
+    // ------------------------------------------------------------------
     // 10. Доказательство, что источник — база
     // ------------------------------------------------------------------
 
@@ -643,5 +698,22 @@ final class ProductCategoryPageTest extends TestCase
     private function categoryId(string $slug): int
     {
         return (int) ProductCategory::where('slug', $slug)->value('id');
+    }
+
+    /**
+     * Категория, которой нет ни в config/site.php, ни в config/catalog.php:
+     * так выглядит запись, созданная владельцем через админку.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function createDatabaseCategory(array $attributes = []): ProductCategory
+    {
+        return ProductCategory::create(array_merge([
+            'name' => 'Перепелиные яйца',
+            'description' => 'Небольшая партия перепелиных яиц.',
+            'slug' => 'iz-bazy',
+            'is_active' => true,
+            'sort_order' => 9,
+        ], $attributes));
     }
 }

@@ -5,15 +5,16 @@ declare(strict_types=1);
 namespace App\Filament\Resources\ProductCategories\Pages;
 
 use App\Filament\Resources\ProductCategories\ProductCategoryResource;
+use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\EditRecord;
 
 /**
  * Редактирование категории продукции.
  *
- * Кнопки удаления здесь нет. Удаление закрыто в трёх местах: действие не
- * добавляется в getHeaderActions(), а canDelete() и canDeleteAny() в
- * ресурсе возвращают false. Одной пустой строки было бы достаточно для
- * интерфейса, но политика обязана закрывать и обход интерфейса.
+ * Удаление доступно только пустой категории: canDelete() в ресурсе
+ * возвращает !$record->products()->exists(), поэтому кнопка у категории с
+ * товарами скрыта (база тот же случай страхует restrictOnDelete). Группового
+ * удаления у категорий нет вовсе.
  */
 class EditProductCategory extends EditRecord
 {
@@ -24,6 +25,8 @@ class EditProductCategory extends EditRecord
      */
     protected function getHeaderActions(): array
     {
-        return [];
+        return [
+            DeleteAction::make(),
+        ];
     }
 }

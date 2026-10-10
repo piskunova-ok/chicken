@@ -2,7 +2,11 @@
 
 namespace App\Providers;
 
+use App\Filesystem\CloudinaryFilesystemAdapter;
+use Illuminate\Filesystem\FilesystemAdapter;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\ServiceProvider;
+use League\Flysystem\Filesystem;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -19,6 +23,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Storage::extend('cloudinary', function ($app, array $config): FilesystemAdapter {
+            $adapter = new CloudinaryFilesystemAdapter($config);
+
+            return new FilesystemAdapter(new Filesystem($adapter), $adapter, $config);
+        });
     }
 }

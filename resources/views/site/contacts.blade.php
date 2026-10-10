@@ -2,7 +2,8 @@
     СТРАНИЦА «КОНТАКТЫ» — /contacts.
 
     Контакты собраны в одном месте: телефон, почта, адрес и режим работы.
-    Значения берутся из config/site.php и выводятся ровно так же, как в
+    Значения идут из настроек сайта: заполненные в админке — из базы,
+    пустые — из config/site.php. Выводятся ровно так же, как в
     подвале, — через App\Support\ContactLinks.
 
     Рядом с контактами стоит форма обратной связи (x-contact-form). Она
@@ -18,13 +19,14 @@
     [ТЕЛЕФОН] получился бы нерабочий tel:, а из [EMAIL] — нерабочий
     mailto:. Это осознанное поведение проекта, а не заглушка на скорую руку.
 
-    Ссылка mailto:/tel: появится сама, как только владелец подставит
-    реальные значения в .env — правки в этом шаблоне для этого не нужны.
+    Ссылка mailto:/tel: появится сама, как только владелец сохранит
+    реальные значения в админке (страница «Настройки сайта») или задаст
+    переменные окружения в .env — правки в этом шаблоне не нужны.
 --}}
 @php
     use App\Support\ContactLinks;
+    use App\Support\Settings;
 
-    $contacts = (array) config('site.contacts', []);
     $business = (array) config('content.business', []);
     $address = ContactLinks::value('address');
     $schedule = ContactLinks::value('schedule');
@@ -47,7 +49,7 @@
 @endphp
 
 <x-layouts.app
-    :title="(config('content.contacts.page_title') ?? 'Контакты').' — '.config('site.name')"
+    :title="(config('content.contacts.page_title') ?? 'Контакты').' — '.Settings::value('company_name')"
     :description="config('content.contacts.meta_description')"
 >
     {{-- ============================ HERO ============================ --}}

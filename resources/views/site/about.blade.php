@@ -30,7 +30,7 @@
 @endphp
 
 <x-layouts.app
-    :title="($about['page_title'] ?? 'О компании').' — '.config('site.name')"
+    :title="($about['page_title'] ?? 'О компании').' — '.\App\Support\Settings::value('company_name')"
     :description="$about['meta_description'] ?? null"
 >
     {{-- ============================ HERO ============================ --}}

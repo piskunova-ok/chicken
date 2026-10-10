@@ -6,6 +6,7 @@ namespace App\Filament\Resources\Products\Pages;
 
 use App\Filament\Resources\Products\ProductResource;
 use App\Models\Product;
+use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
@@ -14,26 +15,29 @@ use Throwable;
 /**
  * Редактирование товара.
  *
- * Кнопки удаления здесь нет. Удаление закрыто в трёх местах: действие не
- * добавлено в getHeaderActions(), а canDelete() и canDeleteAny() в ресурсе
- * возвращают false. Одной пустой строки было бы достаточно для интерфейса,
- * но политика обязана закрывать и обход интерфейса.
- *
- * Отличие от ProductCategoryResource: здесь есть создание, поэтому
- * администратор может добавить товар в существующую категорию.
+ * Удаление разрешено: товар — обычная запись каталога, и владелец может
+ * убрать его окончательно (само удаление плюс физическая уборка файла
+ * изображения). Удаление открыто в трёх местах: действие DeleteAction на
+ * странице, DeleteAction в таблице, canDelete()/canDeleteAny() в ресурсе.
+ * Полное удаление с публичной страницы можно также сделать переключателем
+ * is_active — запись и адрес сохраняются.
  *
  * ЖИЗНЕННЫЙ ЦИКЛ ФАЙЛА ИЗОБРАЖЕНИЯ — ОДИН МЕХАНИЗМ
  *
- * Physical удаление старого изображения при замене и при очистке делает
+ * Физическое удаление старого изображения при замене и при очистке делает
  * пара хуков beforeSave()/afterSave() — и НИЧТО больше. deleteUploadedFileUsing
  * в форме намеренно не регистрируется, поэтому у файла нет двух конкурирующих
  * «удаляльщиков»: кнопка «удалить» в FileUpload только убирает путь из
  * состояния формы, а настоящей очисткой диска занимается страница.
  *
+ * Диск выбирается по виду пути (Product::diskNameForPath): облачные файлы
+ * «products/cld-…» удаляются через Cloudinary API, локальные «products/…» —
+ * с публичного диска. Управляемые пути описаны в Product::isManagedProductImagePath.
+ *
  * Порядок в Filament (EditRecord::save, см. вендор):
  *
  *  1. dehydrate формы → beforeStateDehydrated сохраняет НОВЫЙ загруженный
- *     файл на публичный диск (имя «products/<ulid>.<ext>»);
+ *     файл на выбранный диск (имя «products/cld-<ulid>.<ext>»);
  *  2. validation — при ошибке сохранение прерывается, handleRecordUpdate
  *     и afterSave НЕ выполняются, старый файл и БД не трогаются;
  *  3. handleRecordUpdate() — запись получает новый путь (или NULL);
@@ -41,13 +45,13 @@ use Throwable;
  *     уже положил на диск, а исходное исключение пробрасывается дальше:
  *     иначе новый файл остался бы без ссылки в БД;
  *  4. afterSave() — ЗДЕСЬ удаляется старый файл, только если он существует,
- *     отличается от нового пути и лежит внутри public disk/products.
+ *     отличается от нового пути и лежит внутри управляемого products/.
  *
  * Поэтому: новый файл всегда сохранён и записан в БД до удаления старого,
  * при ошибке validation ничего не удаляется, при ошибке записи удаляется
  * только неиспользуемый новый файл, а удалить можно только файл этого
- * товара в безопасном каталоге public disk. После Create ничего
- * удалять не нужно: старого файла у новой записи нет.
+ * товара в безопасном каталоге. После Create ничего удалять не нужно:
+ * старого файла у новой записи нет.
  */
 class EditProduct extends EditRecord
 {
@@ -135,18 +139,19 @@ class EditProduct extends EditRecord
         }
 
         try {
-            Storage::disk('public')->delete($newImage);
+            Storage::disk(Product::diskNameForPath($newImage))->delete($newImage);
         } catch (Throwable) {
             // Исходная ошибка записи важнее ошибки уборки: её пробрасываем.
         }
     }
 
     /**
-     * После успешной записи удаляем СТАРОЕ изображение с публичного диска.
+     * После успешной записи удаляем СТАРОЕ изображение с правильного диска.
      *
      * К этому моменту новый путь (или NULL) уже в БД: handleRecordUpdate()
      * выполнился. Файл удаляется только когда путь изменился и ведёт в
-     * публичный products-каталог товаров.
+     * управляемый products-каталог. Диск — Cloudinary для «products/cld-…»,
+     * публичный для остальных «products/…» (Product::diskNameForPath).
      */
     protected function afterSave(): void
     {
@@ -166,7 +171,7 @@ class EditProduct extends EditRecord
             return;
         }
 
-        Storage::disk('public')->delete($previousImage);
+        Storage::disk(Product::diskNameForPath($previousImage))->delete($previousImage);
     }
 
     /**
@@ -174,21 +179,24 @@ class EditProduct extends EditRecord
      *
      * Защита от выхода за пределы каталога товаров: в БД может попасть
      * только путь вида «products/<имя>», но проверяем всё равно — удалять
-     * файл вправе лишь такой относительный путь публичного диска.
+     * файл вправе лишь такой относительный путь. Логика вынесена в модель,
+     * чтобы страницы и события пользовались одним правилом.
      */
     private function isManagedProductImagePath(string $path): bool
     {
-        return str_starts_with($path, 'products/')
-            && ! str_contains($path, '..')
-            && ! str_contains($path, '\\')
-            && ! str_starts_with($path, '/');
+        return Product::isManagedProductImagePath($path);
     }
 
     /**
+     * Действия вверху страницы редактирования: удаление записи вместе с
+     * физической уборкой файла (событие deleting модели Product).
+     *
      * @return array<int, \Filament\Actions\Action>
      */
     protected function getHeaderActions(): array
     {
-        return [];
+        return [
+            DeleteAction::make(),
+        ];
     }
 }

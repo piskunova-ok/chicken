@@ -60,6 +60,31 @@ return [
             'report' => false,
         ],
 
+        /*
+        |--------------------------------------------------------------------------
+        | Cloudinary Disk
+        |--------------------------------------------------------------------------
+        |
+        | Фотографии товаров, загружаемые из админки, хранятся в облаке
+        | Cloudinary (CLOUDINARY_CLOUD_NAME / API_KEY / API_SECRET). Пока
+        | переменные не заданы, диск существует, но любая операция записи
+        | вернёт понятную ошибку — локальные пути products/* продолжают
+        | отдаваться со старого public-диска.
+        |
+        */
+
+        'cloudinary' => [
+            'driver' => 'cloudinary',
+            'cloud_name' => env('CLOUDINARY_CLOUD_NAME'),
+            'api_key' => env('CLOUDINARY_API_KEY'),
+            'api_secret' => env('CLOUDINARY_API_SECRET'),
+            'url' => empty(env('CLOUDINARY_CLOUD_NAME'))
+                ? null
+                : rtrim('https://res.cloudinary.com/'.env('CLOUDINARY_CLOUD_NAME'), '/').'/image/upload',
+            'throw' => false,
+            'report' => false,
+        ],
+
     ],
 
     /*

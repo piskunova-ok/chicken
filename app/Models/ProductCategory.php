@@ -25,7 +25,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * данные могли бы прийти из формы или импорта неожиданного вида. Явный
  * #[Fillable] перечисляет ровно те поля, которыми управляет каталог.
  */
-#[Fillable(['name', 'slug', 'is_active', 'sort_order'])]
+#[Fillable(['name', 'description', 'slug', 'is_active', 'sort_order'])]
 class ProductCategory extends Model
 {
     /**

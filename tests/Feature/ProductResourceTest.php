@@ -29,15 +29,16 @@ use Tests\TestCase;
 
 /**
  * ProductResource: управление текстовыми данными товаров в режиме
- * READ + CREATE + UPDATE.
+ * READ + CREATE + UPDATE + DELETE.
  *
  * ЧТО ЗДЕСЬ ПРОВЕРЯЕТСЯ
  *
  * Четыре вещи, каждая из которых могла быть сделана неправильно незаметно:
  *
- * 1. Права: создание открыто, удаление закрыто. Проверяются и политикой
- *    (can*()), и набором действий, и тем, что записи переживают визит в
- *    раздел.
+ * 1. Права: создание и удаление открыты. Проверяются и политикой
+ *    (can*()), и набором действий, и тем, что простое посещение раздела
+ *    ничего не удаляет. Удаление файлов с Cloudinary при удалении товара —
+ *    в ProductImageUploadTest, здесь остаётся целостность прав и записей.
  * 2. Составная уникальность slug. Соблазн сделать global unique(slug)
  *    велик — правило короче, — но он запретил бы одинаковый slug в разных
  *    категориях, тогда как база такого запрета не накладывает (составной
@@ -936,52 +937,89 @@ class ProductResourceTest extends TestCase
 
     /*
     |--------------------------------------------------------------------------
-    | 6. Удаление закрыто
+    | 6. Удаление открыто
     |--------------------------------------------------------------------------
+    |
+    | Владелец удаляет товары из панели. Вместе с записью удаляется и её
+    | изображение с Cloudinary — но только «управляемое» (путь products/cld-*),
+    | файлы Git-макета (images/products/*) никогда не трогаются. Сценарий
+    | файлов целиком — в ProductImageUploadTest, здесь — права и действия.
     */
 
-    public function test_deleting_a_product_is_not_allowed_by_policy(): void
+    public function test_deleting_a_product_is_allowed_by_policy(): void
     {
-        $this->assertFalse(ProductResource::canDelete(Product::query()->firstOrFail()));
+        $this->assertTrue(ProductResource::canDelete(Product::query()->firstOrFail()));
     }
 
-    public function test_bulk_deleting_products_is_not_allowed_by_policy(): void
+    public function test_bulk_deleting_products_is_allowed_by_policy(): void
     {
-        $this->assertFalse(ProductResource::canDeleteAny());
+        $this->assertTrue(ProductResource::canDeleteAny());
     }
 
-    public function test_the_list_has_no_delete_action_in_the_header(): void
-    {
-        $this->actingAsAdmin();
-
-        Livewire::test(ListProducts::class)
-            ->assertActionDoesNotExist(DeleteAction::class);
-    }
-
-    public function test_the_list_has_no_row_delete_action(): void
+    public function test_the_list_has_a_row_delete_action(): void
     {
         $this->actingAsAdmin();
 
         Livewire::test(ListProducts::class)
-            ->assertTableActionDoesNotExist(DeleteAction::class, record: $this->productIn($this->eggs()));
+            ->assertTableActionExists(DeleteAction::class, record: $this->productIn($this->eggs()));
     }
 
-    public function test_the_list_has_no_bulk_delete_action(): void
+    public function test_the_list_has_a_bulk_delete_action(): void
     {
         $this->actingAsAdmin();
 
         Livewire::test(ListProducts::class)
-            ->assertTableBulkActionDoesNotExist(DeleteBulkAction::class);
+            ->assertTableBulkActionExists(DeleteBulkAction::class);
     }
 
-    public function test_the_edit_page_has_no_delete_action(): void
+    public function test_the_edit_page_has_a_delete_action(): void
     {
         $this->actingAsAdmin();
 
         $product = $this->productIn($this->eggs());
 
         Livewire::test(EditProduct::class, ['record' => $product->getKey()])
-            ->assertActionDoesNotExist(DeleteAction::class);
+            ->assertActionExists(DeleteAction::class);
+    }
+
+    public function test_a_product_can_be_deleted_from_the_list(): void
+    {
+        $this->actingAsAdmin();
+
+        $product = $this->productIn($this->eggs());
+
+        Livewire::test(ListProducts::class)
+            ->callTableAction(DeleteAction::class, $product)
+            ->assertHasNoTableActionErrors();
+
+        $this->assertDatabaseMissing('products', ['id' => $product->getKey()]);
+    }
+
+    public function test_several_products_can_be_deleted_with_a_bulk_action(): void
+    {
+        $this->actingAsAdmin();
+
+        $products = $this->eggs()->products()->orderBy('id')->limit(2)->get();
+
+        Livewire::test(ListProducts::class)
+            ->callTableBulkAction(DeleteBulkAction::class, $products)
+            ->assertHasNoTableActionErrors();
+
+        foreach ($products as $product) {
+            $this->assertDatabaseMissing('products', ['id' => $product->getKey()]);
+        }
+    }
+
+    public function test_a_product_can_be_deleted_from_the_edit_page(): void
+    {
+        $this->actingAsAdmin();
+
+        $product = $this->productIn($this->eggs());
+
+        Livewire::test(EditProduct::class, ['record' => $product->getKey()])
+            ->callAction(DeleteAction::class);
+
+        $this->assertDatabaseMissing('products', ['id' => $product->getKey()]);
     }
 
     public function test_no_product_is_deleted_while_the_resource_is_used(): void
@@ -1115,17 +1153,17 @@ class ProductResourceTest extends TestCase
     | 8. Изображение товара
     |--------------------------------------------------------------------------
     |
-    | Загрузка изображений перенесена на страницу поля FileUpload
-    | (диск, каталог, типы, замена, очистка) в ProductImageUploadTest.
-    | Здесь остаётся привязка к правам и целостности формы: существующий
-    | редактор без изменений изображения не трогает ни поле, ни файл, а
-    | создание товара с изображением кладёт в products.image относительный
-    | путь публичного диска.
+    | Загрузка изображений перенесена на страницу поля FileUpload (диск,
+    | каталог, типы, замена, очистка) в ProductImageUploadTest. Здесь
+    | остаётся привязка к правам и целостности формы: у ресурса есть поле
+    | загрузки файла, оно настроено на Cloudinary с каталогом products,
+    | редактор без изменений изображения не трогает файл, а создание товара
+    | с изображением кладёт в products.image относительный путь
+    | products/cld-*.
     |
-    | История: до Этапа 9.4 здесь был тест, который специально подтверждал
-    | ОТСУТСТВИЕ FileUpload в форме. Он противоречил новой функциональности
-    | и заменён проверками ниже (см. ProductImageUploadTest — полный сценарий
-    | загрузки, замены и очистки файла).
+    | История: до Этапа 9.4 в форме был только показ пути image_path.
+    | С появлением Cloudinary его заменило активное поле FileUpload
+    | (см. ProductForm и ProductImageUploadTest).
     */
 
     public function test_editing_other_fields_leaves_the_image_path_untouched(): void
@@ -1147,22 +1185,18 @@ class ProductResourceTest extends TestCase
     }
 
     /**
-     * В форме товара НЕТ поля загрузки файла — только показ пути.
+     * В форме товара есть поле загрузки изображения, настроенное на
+     * Cloudinary и каталог products.
      *
-     * Фотографии каталога лежат в public/images/products и обновляются через
-     * Git. Загрузка через панель дала бы путь на временный диск storage, который
-     * не переживает деплой, поэтому её убрали целиком, а не просто заблокировали.
-     *
-     * Поле image_path остаётся видимым: администратор должен видеть, какая
-     * фотография прописана у товара, иначе пришлось бы лезть в базу.
+     * Раньше здесь было поле image_path (только показ пути). Теперь
+     * загрузка — единственное хозяйство изображения, и тест фиксирует
+     * конфигурацию поля, чтобы оно не «съехало» на временный публичный диск.
      */
-    public function test_the_form_shows_the_photo_path_and_offers_no_upload(): void
+    public function test_the_form_has_a_file_upload_component_for_the_image(): void
     {
         $this->actingAsAdmin();
 
         $product = $this->productIn($this->eggs());
-
-        $this->assertSame('images/products/egg-c0.jpg', $product->image);
 
         $form = Livewire::test(EditProduct::class, ['record' => $product->getKey()])
             ->instance()
@@ -1175,32 +1209,33 @@ class ProductResourceTest extends TestCase
             $components,
         );
 
-        $this->assertContains('image_path', $fieldNames, 'Показ пути к фотографии должен остаться.');
-        $this->assertNotContains('image', $fieldNames, 'Поля image в форме быть не должно.');
+        $this->assertContains('image', $fieldNames, 'Поле image в форме должно быть.');
+        $this->assertNotContains('image_path', $fieldNames, 'Показ пути больше не нужен: загрузка заменяет его.');
 
-        // Компонент загрузки файлов в форме отсутствует полностью: пока он
-        // есть, загрузку можно случайно вернуть и снова получить временные
-        // фотографии, исчезающие при деплое.
-        $this->assertFalse(
+        $this->assertTrue(
             $this->formHasFileUpload($components),
-            'В форме не должно быть ни одного компонента загрузки файлов.',
+            'В форме должно быть поле загрузки файлов.',
         );
+
+        $upload = $form->getComponent('image');
+
+        $this->assertInstanceOf(FileUpload::class, $upload);
+        $this->assertSame('cloudinary', $upload->getDiskName());
+        $this->assertSame('products', $upload->getDirectory());
     }
 
     /**
-     * Создание товара с файлом НЕ записывает путь в products.image.
+     * Создание товара с изображением кладёт в products.image относительный
+     * путь products/cld-* на диске cloudinary.
      *
-     * Загрузка в панели отключена (ProductForm, поле image помечено
-     * disabled): фотографии каталога лежат в public/images/products и
-     * обновляются через Git. Поэтому товар, созданный из админки, остаётся
-     * без картинки, пока её не добавят в репозиторий.
-     *
-     * Полный сценарий путей в базе — в ProductImageUploadTest.
+     * Имя файла генерирует Filament (ulid), наша задача — проследить, что
+     * в базу попадает именно управляемый путь Cloudinary, а не путь на
+     * временный публичный диск.
      */
-    public function test_creating_a_product_with_an_image_stores_no_public_disk_path(): void
+    public function test_creating_a_product_with_an_image_stores_a_cloudinary_path(): void
     {
         $this->actingAsAdmin();
-        Storage::fake('public');
+        Storage::fake('cloudinary');
 
         $category = $this->eggs();
 
@@ -1211,13 +1246,16 @@ class ProductResourceTest extends TestCase
                 'slug' => self::NEW_SLUG,
                 'image' => UploadedFile::fake()->create('photo.jpg', 10, 'image/jpeg'),
             ])
-            ->call('create');
+            ->call('create')
+            ->assertHasNoFormErrors();
 
         $product = Product::query()->where('slug', self::NEW_SLUG)->firstOrFail();
 
-        $this->assertNull(
-            $product->image,
-            'Путь на диск storage не должен попадать в базу: страница читает public/.',
+        $this->assertNotNull($product->image);
+        $this->assertStringStartsWith('products/cld-', $product->image);
+        $this->assertTrue(
+            Storage::disk('cloudinary')->exists($product->image),
+            'Временный файл должен переехать на диск cloudinary.',
         );
     }
 

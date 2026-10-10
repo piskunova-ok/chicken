@@ -204,6 +204,43 @@ final class SitemapTest extends TestCase
         $this->assertContains(self::SITE_URL.'/', $locations);
     }
 
+    public function test_the_sitemap_lists_a_category_added_in_the_admin_panel(): void
+    {
+        ProductCategory::create([
+            'name' => 'Перепелиные яйца',
+            'description' => 'Небольшая партия перепелиных яиц.',
+            'slug' => 'iz-bazy',
+            'is_active' => true,
+            'sort_order' => 9,
+        ]);
+
+        $locations = $this->locations();
+
+        // Категория живёт по общему маршруту products.category, а не в
+        // config/site.php, но в карте она обязана появиться: её страница
+        // открывается, значит робот вправе её узнать.
+        $this->assertContains(self::SITE_URL.'/products/iz-bazy', $locations);
+        $this->assertCount(8, $locations);
+
+        $this->get('/products/iz-bazy')->assertOk();
+    }
+
+    public function test_the_sitemap_does_not_advertise_an_inactive_admin_category(): void
+    {
+        ProductCategory::create([
+            'name' => 'Перепелиные яйца',
+            'description' => 'Небольшая партия перепелиных яиц.',
+            'slug' => 'iz-bazy',
+            'is_active' => false,
+            'sort_order' => 9,
+        ]);
+
+        $locations = $this->locations();
+
+        $this->assertNotContains(self::SITE_URL.'/products/iz-bazy', $locations);
+        $this->assertCount(7, $locations);
+    }
+
     public function test_the_sitemap_does_not_list_the_contact_form_as_a_separate_address(): void
     {
         // POST /contacts — адрес формы, а не страница: GET-версии у него нет.

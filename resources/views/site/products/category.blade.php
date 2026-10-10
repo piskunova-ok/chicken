@@ -1,7 +1,9 @@
 {{--
     СТРАНИЦА КАТЕГОРИИ ПРОДУКЦИИ.
 
-    Общая страница для всех категорий: /products/eggs и /products/chicken.
+    Общая страница для всех категорий: известных (eggs, chicken — данные
+    оформления из config/catalog.php) и добавленных в админке (без таких
+    данных — вводный абзац и мета-описание берутся из записи базы).
 
     Источники данных разделены:
         SQLite + Eloquent -> $category и $products (заголовок h1, хлебные
@@ -32,6 +34,8 @@
 --}}
 
 @php
+    use App\Support\Settings;
+
     /*
      | Хлебные крошки. «Продукция» ведёт на обзорную страницу /products:
      | маршрут products.index создан, поэтому пункт стал ссылкой. До его
@@ -85,10 +89,15 @@
      | проекте, и дублировать их в catalog.php не нужно.
      |
      | $page — запись категории из config/site.php. Используется только как
-     | запасной источник описания: список товаров отсюда больше не берётся.
+     | запасной источник описания: список товаров отсюда больше не читается.
+     |
+     | Для категории, добавленной в админке, записей в config/catalog.php и
+     | config/site.php нет: мета-описание и вводный абзац берутся из колонки
+     | description этой же записи базы.
      */
-    $pageTitle = $category->name.' — '.config('site.name');
-    $pageDescription = $catalog['meta_description'] ?? ($page['description'] ?? null);
+    $pageTitle = $category->name.' — '.Settings::value('company_name');
+    $pageDescription = $catalog['meta_description']
+        ?? ($page['description'] ?? $category->description ?? null);
 @endphp
 
 <x-layouts.app :title="$pageTitle" :description="$pageDescription">
@@ -113,7 +122,7 @@
                 <x-section-heading
                     :eyebrow="$catalog['eyebrow'] ?? 'Продукция'"
                     :title="$category->name"
-                    :lead="$catalog['intro'] ?? null"
+                    :lead="$catalog['intro'] ?? $category->description ?? null"
                     level="h1"
                 />
             </div>

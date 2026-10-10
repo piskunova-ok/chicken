@@ -1,8 +1,21 @@
 @php
+    use App\Support\Settings;
+
     $navigation = $navigation();
     $legalLinks = $legalLinks();
     $partners = $partners();
-    $contacts = config('site.contacts');
+    $companyName = Settings::value('company_name');
+    $contacts = [
+        'phone' => Settings::value('phone'),
+        'email' => Settings::value('email'),
+        'address' => Settings::value('address'),
+        'schedule' => Settings::value('schedule'),
+    ];
+    $socials = array_filter([
+        'telegram' => Settings::socialUrl('telegram'),
+        'whatsapp' => Settings::socialUrl('whatsapp'),
+        'vk' => Settings::socialUrl('vk'),
+    ], static fn ($url): bool => $url !== null);
     $phoneUrl = $phoneUrl();
     $emailUrl = $emailUrl();
 @endphp
@@ -12,9 +25,9 @@
         <div class="grid gap-12 py-16 md:grid-cols-2 lg:grid-cols-4 lg:gap-10">
             {{-- Компания --}}
             <div>
-                <p class="text-body font-bold tracking-tight">{{ config('site.name') }}</p>
+                <p class="text-body font-bold tracking-tight">{{ $companyName }}</p>
                 <p class="mt-4 max-w-xs text-small text-ink-inverse/70">
-                    {{ config('site.short_description') }}
+                    {{ Settings::value('short_description') }}
                 </p>
             </div>
 
@@ -69,6 +82,24 @@
                     <li class="text-ink-inverse/80">{{ $contacts['address'] }}</li>
                     <li class="text-ink-inverse/80">{{ $contacts['schedule'] }}</li>
                 </ul>
+
+                @if ($socials !== [])
+                    <div class="mt-5 flex flex-wrap gap-4">
+                        @foreach ($socials as $network => $url)
+                            <a
+                                href="{{ $url }}"
+                                rel="noopener noreferrer"
+                                target="_blank"
+                                class="text-small text-ink-inverse/80 no-underline transition-colors duration-200 hover:text-ink-inverse"
+                            >{{ match ($network) {
+                                'telegram' => 'Telegram',
+                                'whatsapp' => 'WhatsApp',
+                                'vk' => 'ВКонтакте',
+                                default => $network,
+                            } }}</a>
+                        @endforeach
+                    </div>
+                @endif
             </div>
 
             {{-- Документы и партнёры --}}
@@ -123,7 +154,7 @@
         </div>
 
         <div class="flex flex-col gap-2 border-t border-white/10 py-6 text-small text-ink-inverse/60 sm:flex-row sm:items-center sm:justify-between">
-            <p>&copy; {{ now()->year }} {{ config('site.name') }}</p>
+            <p>&copy; {{ now()->year }} {{ $companyName }}</p>
             <p>Все права защищены.</p>
         </div>
     </x-container>

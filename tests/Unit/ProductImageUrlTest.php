@@ -135,6 +135,77 @@ class ProductImageUrlTest extends TestCase
     }
 
     /**
+     * Путь products/cld-… — загрузка из Cloudinary. Когда облако настроено,
+     * ссылку отдаёт сам диск: у него url строится из cloud_name, а не из
+     * локального /storage. Проверяется точная форма адреса CDN.
+     */
+    public function test_a_cloudinary_path_is_rendered_through_the_cdn_when_configured(): void
+    {
+        Storage::forgetDisk('cloudinary');
+
+        config([
+            'filesystems.disks.cloudinary.cloud_name' => 'test-cloud',
+            'filesystems.disks.cloudinary.url' => null,
+        ]);
+
+        $path = 'products/cld-01M3T1AMSMS67QZFV35HBX9ZPW.jpg';
+
+        $this->assertTrue(Product::isCloudinaryImagePath($path));
+
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/'.$path,
+            (new Product(['image' => $path]))->imageUrl(),
+        );
+    }
+
+    /**
+     * Пока Cloudinary не настроен, облачных файлов там быть не может, и
+     * ссылка деградирует до публичного диска — страница не падает и не
+     * показывает битый адрес CDN.
+     */
+    public function test_a_cloudinary_path_falls_back_to_the_public_disk_when_not_configured(): void
+    {
+        Storage::forgetDisk('cloudinary');
+        Storage::fake('public');
+
+        config([
+            'filesystems.disks.cloudinary.cloud_name' => null,
+            'filesystems.disks.cloudinary.url' => null,
+        ]);
+
+        $path = 'products/cld-01M3T1AMSMS67QZFV35HBX9ZPW.jpg';
+        $url = (new Product(['image' => $path]))->imageUrl();
+
+        $this->assertSame(Storage::disk('public')->url($path), $url);
+        $this->assertStringNotContainsString('res.cloudinary.com', (string) $url);
+    }
+
+    /**
+     * Обычная запись старого локального пути products/<ulid> не должна
+     * уходить в Cloudinary даже при настроенном облаке: префикс cld-
+     * единственный признак облачной загрузки.
+     */
+    public function test_a_non_cloudinary_managed_path_stays_on_the_public_disk(): void
+    {
+        Storage::forgetDisk('cloudinary');
+        Storage::fake('public');
+
+        config([
+            'filesystems.disks.cloudinary.cloud_name' => 'test-cloud',
+            'filesystems.disks.cloudinary.url' => null,
+        ]);
+
+        $path = 'products/01M3T1AMSMS67QZFV35HBX9ZPW.png';
+
+        $this->assertFalse(Product::isCloudinaryImagePath($path));
+
+        $url = (new Product(['image' => $path]))->imageUrl();
+
+        $this->assertSame(Storage::disk('public')->url($path), $url);
+        $this->assertStringNotContainsString('res.cloudinary.com', (string) $url);
+    }
+
+    /**
      * Метод не должен обращаться к базе: он вызывается при рендере списка
      * для каждого товара, и лишний запрос на строку там недопустим.
      */

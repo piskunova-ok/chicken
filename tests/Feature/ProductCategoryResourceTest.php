@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Filament\Resources\ProductCategories\Pages\CreateProductCategory;
 use App\Filament\Resources\ProductCategories\Pages\EditProductCategory;
 use App\Filament\Resources\ProductCategories\Pages\ListProductCategories;
 use App\Filament\Resources\ProductCategories\ProductCategoryResource;
@@ -22,22 +23,24 @@ use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * ProductCategoryResource: управление существующими категориями в режиме
- * READ + UPDATE.
+ * ProductCategoryResource: управление категориями в режиме
+ * READ + CREATE + UPDATE + DELETE (удаление — только у пустых категорий).
  *
  * ЧТО ЗДЕСЬ ПРОВЕРЯЕТСЯ
  *
- * Три разных вещи, которые легко спутать:
+ * Четыре разных вещи, которые легко спутать:
  *
  * 1. Кто может попасть в раздел. Проверяется настоящим HTTP-запросом, потому
  *    что доступ закрывает middleware панели, а не сам Resource.
  * 2. Что именно раздел позволяет. Проверяется через API Filament/Livewire:
  *    набор зарегистрированных страниц, политика can*() и наличие действий.
  *    Привязка к HTML здесь была бы хрупкой — вёрстка Filament меняется от
- *    версии к версии, а поведениеResource нет.
- * 3. Что правка действительно попадает в базу. Проверяется перечитыванием
- *    модели из БД: правка, которая живёт только в интерфейсе, не является
- *    правкой.
+ *    версии к версии, а поведение Resource нет.
+ * 3. Что создание и правка действительно попадают в базу. Проверяется
+ *    перечитыванием модели из БД: правка, которая живёт только в интерфейсе,
+ *    не является правкой.
+ * 4. Что удаление доступно ровно пустой категории и недоступно категории с
+ *    товарами. Группового удаления нет вовсе.
  *
  * ОТДЕЛЬНО ПРО ПУБЛИЧНЫЙ САЙТ
  *
@@ -108,6 +111,18 @@ class ProductCategoryResourceTest extends TestCase
     private function chicken(): ProductCategory
     {
         return ProductCategory::query()->where('slug', 'chicken')->firstOrFail();
+    }
+
+    /**
+     * Пустая категория без товаров — единственная, которую можно удалить.
+     */
+    private function emptyCategory(): ProductCategory
+    {
+        return ProductCategory::create([
+            'name' => 'Пустая категория',
+            'slug' => 'empty-category',
+            'sort_order' => 9,
+        ]);
     }
 
     /*
@@ -257,8 +272,24 @@ class ProductCategoryResourceTest extends TestCase
         Livewire::test(EditProductCategory::class, ['record' => $this->eggs()->getKey()])
             ->assertSuccessful()
             ->assertFormFieldExists('name')
+            ->assertFormFieldExists('description')
             ->assertFormFieldExists('is_active')
             ->assertFormFieldExists('sort_order');
+    }
+
+    public function test_an_admin_can_edit_the_description_and_the_change_reaches_the_database(): void
+    {
+        $this->actingAsAdmin();
+
+        Livewire::test(EditProductCategory::class, ['record' => $this->eggs()->getKey()])
+            ->fillForm(['description' => 'Описание категории из панели.'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertDatabaseHas('product_categories', [
+            'id' => $this->eggs()->getKey(),
+            'description' => 'Описание категории из панели.',
+        ]);
     }
 
     public function test_an_admin_can_rename_a_category_and_the_change_reaches_the_database(): void
@@ -403,18 +434,22 @@ class ProductCategoryResourceTest extends TestCase
 
     /*
     |--------------------------------------------------------------------------
-    | 4. Slug неизменен
+    | 4. Slug: задаётся при создании, не меняется при правке
     |--------------------------------------------------------------------------
     */
 
-    public function test_the_slug_is_shown_but_cannot_be_edited(): void
+    public function test_the_slug_field_exists_on_the_edit_page_but_is_not_disabled(): void
     {
         $this->actingAsAdmin();
 
+        /*
+         * Поле видно и заполнено, но НЕ disabled: защита держится на
+         * dehydrated(operation === 'create'), а не на запрете ввода.
+         * disabled() запретил бы ввод, но не запись значения.
+         */
         Livewire::test(EditProductCategory::class, ['record' => $this->eggs()->getKey()])
             ->assertSuccessful()
-            ->assertFormFieldExists('slug')
-            ->assertFormFieldDisabled('slug');
+            ->assertFormFieldExists('slug');
     }
 
     public function test_a_submitted_slug_does_not_change_the_record(): void
@@ -465,63 +500,150 @@ class ProductCategoryResourceTest extends TestCase
 
     /*
     |--------------------------------------------------------------------------
-    | 5. Создание закрыто
+    | 5. Создание открыто
     |--------------------------------------------------------------------------
+    |
+    | Новая категория сразу живёт на сайте: /products/{slug} открывается по
+    | общей разметке, карточка появляется на /products. Slug вводится здесь и
+    | только здесь — при правке он не меняется (раздел 4).
     */
 
-    public function test_creating_a_category_is_not_allowed_by_policy(): void
+    public function test_creating_a_category_is_allowed_by_policy(): void
     {
-        $this->assertFalse(ProductCategoryResource::canCreate());
+        $this->assertTrue(ProductCategoryResource::canCreate());
     }
 
-    public function test_the_create_page_is_not_registered(): void
+    public function test_the_create_page_is_registered(): void
     {
-        // Страницы создания нет в getPages(), поэтому нет и маршрута: не
-        // «страница есть и отказывает», а адреса не существует вовсе.
-        $this->assertNull(
+        $this->assertNotNull(
             Route::getRoutes()->getByName('filament.admin.resources.product-categories.create'),
         );
     }
 
-    public function test_the_create_address_returns_not_found(): void
+    public function test_an_admin_can_open_the_create_page(): void
     {
         $this->actingAsAdmin();
 
-        $this->get('/admin/product-categories/create')->assertNotFound();
+        $this->get('/admin/product-categories/create')->assertOk();
     }
 
-    public function test_the_list_has_no_create_action(): void
+    public function test_the_list_has_a_create_action(): void
     {
         $this->actingAsAdmin();
 
         Livewire::test(ListProductCategories::class)
             ->assertSuccessful()
-            ->assertActionDoesNotExist(CreateAction::class);
+            ->assertActionExists(CreateAction::class);
+    }
+
+    public function test_an_admin_can_create_a_category_and_it_reaches_the_database(): void
+    {
+        $this->actingAsAdmin();
+
+        Livewire::test(CreateProductCategory::class)
+            ->fillForm([
+                'name' => 'Перепелиные яйца',
+                'description' => 'Новая категория из панели.',
+                'slug' => 'perepelinye-yaytsa',
+                'is_active' => true,
+                'sort_order' => 3,
+            ])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $this->assertDatabaseHas('product_categories', [
+            'slug' => 'perepelinye-yaytsa',
+            'name' => 'Перепелиные яйца',
+            'description' => 'Новая категория из панели.',
+        ]);
+
+        $this->assertSame(3, ProductCategory::count());
+    }
+
+    public function test_the_slug_is_required_when_creating(): void
+    {
+        $this->actingAsAdmin();
+
+        Livewire::test(CreateProductCategory::class)
+            ->fillForm([
+                'name' => 'Без адреса',
+                'slug' => '',
+                'sort_order' => 0,
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['slug' => 'required']);
+    }
+
+    public function test_the_slug_rejects_uppercase_and_spaces(): void
+    {
+        $this->actingAsAdmin();
+
+        Livewire::test(CreateProductCategory::class)
+            ->fillForm([
+                'name' => 'Кривой адрес',
+                'slug' => 'Krivoy Adres',
+                'sort_order' => 0,
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['slug' => 'regex']);
+    }
+
+    public function test_the_slug_must_be_unique_when_creating(): void
+    {
+        $this->actingAsAdmin();
+
+        Livewire::test(CreateProductCategory::class)
+            ->fillForm([
+                'name' => 'Дубликат яиц',
+                'slug' => 'eggs',
+                'sort_order' => 0,
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['slug' => 'unique']);
     }
 
     /*
     |--------------------------------------------------------------------------
-    | 6. Удаление закрыто
+    | 6. Удаление — только у пустой категории
     |--------------------------------------------------------------------------
+    |
+    | Категорию с товарами удалить нельзя: canDelete() возвращает
+    | !$record->products()->exists(), внешний ключ страхует тот же случай в
+    | базе, а панель просто не показывает кнопку. Группового удаления нет
+    | вовсе — категории удаляются только по одной.
     */
 
-    public function test_deleting_a_category_is_not_allowed_by_policy(): void
+    public function test_deleting_a_category_with_products_is_not_allowed_by_policy(): void
     {
         $this->assertFalse(ProductCategoryResource::canDelete($this->eggs()));
     }
 
-    public function test_bulk_deleting_is_not_allowed_by_policy(): void
+    public function test_deleting_an_empty_category_is_allowed_by_policy(): void
+    {
+        $this->assertTrue(ProductCategoryResource::canDelete($this->emptyCategory()));
+    }
+
+    public function test_bulk_deleting_is_never_allowed_by_policy(): void
     {
         $this->assertFalse(ProductCategoryResource::canDeleteAny());
     }
 
-    public function test_the_edit_page_has_no_delete_action(): void
+    public function test_the_edit_page_hides_the_delete_action_for_a_category_with_products(): void
     {
         $this->actingAsAdmin();
 
         Livewire::test(EditProductCategory::class, ['record' => $this->eggs()->getKey()])
             ->assertSuccessful()
             ->assertActionDoesNotExist(DeleteAction::class);
+    }
+
+    public function test_the_edit_page_shows_the_delete_action_for_an_empty_category(): void
+    {
+        $this->actingAsAdmin();
+
+        Livewire::test(EditProductCategory::class, ['record' => $this->emptyCategory()->getKey()])
+            ->assertSuccessful()
+            ->assertActionExists(DeleteAction::class);
     }
 
     public function test_the_list_has_no_bulk_delete_action(): void
@@ -533,12 +655,24 @@ class ProductCategoryResourceTest extends TestCase
             ->assertTableBulkActionDoesNotExist(DeleteBulkAction::class);
     }
 
+    public function test_an_admin_can_delete_an_empty_category(): void
+    {
+        $this->actingAsAdmin();
+
+        $empty = $this->emptyCategory();
+
+        Livewire::test(EditProductCategory::class, ['record' => $empty->getKey()])
+            ->callAction(DeleteAction::class);
+
+        $this->assertDatabaseMissing('product_categories', ['id' => $empty->getKey()]);
+    }
+
     public function test_the_categories_survive_a_full_visit_to_the_resource(): void
     {
         $this->actingAsAdmin();
 
         // Обе категории и все товары переживают и просмотр списка, и
-        // редактирование: ни одно действие раздела не способно убрать запись.
+        // редактирование: само посещение раздела ничего не удаляет.
         Livewire::test(ListProductCategories::class)->assertSuccessful();
         Livewire::test(EditProductCategory::class, ['record' => $this->eggs()->getKey()])
             ->fillForm(['name' => self::EGGS_NAME])

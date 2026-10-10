@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <title>{{ $title ?? config('site.name') }}</title>
-    <meta name="description" content="{{ $description ?? config('site.short_description') }}">
+    <title>{{ $title ?? \App\Support\Settings::value('company_name') }}</title>
+    <meta name="description" content="{{ $description ?? \App\Support\Settings::value('short_description') }}">
 
     <link rel="canonical" href="{{ $canonical ?? url()->current() }}">
 

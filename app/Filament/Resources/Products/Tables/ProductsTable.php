@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Products\Tables;
 
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -118,15 +120,16 @@ class ProductsTable
                 ->orderBy('products.id'))
             ->defaultKeySort()
             ->recordActions([
-                // Единственное действие над записью — открыть её на
-                // редактирование. Ни удаления, ни просмотра во вкладке.
+                // Открыть товар на редактирование или удалить запись вместе
+                // с фотографией (уборкой файла занимается событие deleting
+                // модели Product).
                 EditAction::make(),
+                DeleteAction::make(),
             ])
             ->toolbarActions([
-                // Групповых действий нет намеренно. canDeleteAny() уже
-                // скрывает удаление, но пустой список означает и то, что
-                // панель групповых действий не отрисуется вовсе: защита
-                // должна быть видна и в вёрстке, а не только в политике.
+                // Групповое удаление: убирает записи и их файлы разом.
+                // Модель сама подчищает изображения.
+                DeleteBulkAction::make(),
             ]);
     }
 }

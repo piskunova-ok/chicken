@@ -6,55 +6,56 @@ namespace Tests\Feature;
 
 use App\Filament\Resources\Products\Pages\CreateProduct;
 use App\Filament\Resources\Products\Pages\EditProduct;
-use App\Filament\Resources\Products\ProductResource;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\User;
 use Database\Seeders\ProductCatalogSeeder;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\FileUpload;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * Загрузка изображений товаров (Этап 9.4).
+ * Загрузка изображений товаров (Этап 9.4, перенос в Cloudinary).
  *
  * ЧТО ЗДЕСЬ ПРОВЕРЯЕТСЯ
  *
- * Поле image товара — FileUpload Filament 5.9 на публичном диске:
+ * Поле image товара — FileUpload Filament 5.9 на облачном диске:
  *
- *  - disk = public, directory = products, visibility = public;
- *  - типы проверяются СЕРВЕРОМ (mimetypes): JPEG, PNG, WebP; TXT и файлы
- *    больше 4096 КБ отклоняются;
- *  - в products.image попадает только относительный путь «products/<имя>»,
- *    а не абсолютный путь и не URL;
- *  - публичная страница строит URL через Storage::disk('public')->url(),
- *    а при image = NULL показывает прежнюю заглушку;
- *  - замена и очистка изображения удаляют СТАРЫЙ файл ровно ОДНИМ
- *    механизмом — пара beforeSave()/afterSave() на странице EditProduct —
- *    и только после успешной записи: при ошибке validation старый файл
- *    сохраняется.
+ *  - disk = cloudinary, directory = products, maxSize = 5120 КБ, image();
+ *  - в products.image попадает только относительный путь
+ *    «products/cld-<ulid>.<ext>», а не абсолютный путь и не URL;
+ *  - публичная страница строит URL через Cloudinary CDN для путей
+ *    products/cld-* и откатывается на публичный диск, пока переменные
+ *    окружения Cloudinary не заданы;
+ *  - замена и очистка изображения удаляют СТАРЫЙ управляемый файл ровно
+ *    одним механизмом — beforeSave()/afterSave() на странице EditProduct —
+ *    и только после успешной записи;
+ *  - удаление товара уносит его управляемый файл (событие deleting модели
+ *    Product), но НИКОГДА не трогает файлы Git-макета public/images/products.
  *
- * О ПРОВЕРКЕ ЗАМЕНЫ
+ * О ПРОВЕРКЕ ЗАМЕНЫ И ОЧИСТКИ
  *
  * Замена/очистка проверяются на уровне пути: в состояние формы
  * подставляется путь уже сохранённого файла (как если бы upload завершился).
- * Сам конвейер upload→путь на публичный диск покрыт create-тестами ниже.
- * Так сделано потому, что в Livewire-тест-харнесе поток файла в НЕпустое
- * одиночное поле ДОБАВЛЯЕТСЯ к существующему состоянию, а не заменяет его,
- * — это расходится с поведением браузера и не относится к нашему
- * lifecycle-механизму очистки.
+ * Сам конвейер upload→путь покрыт create-тестами ниже. Так сделано потому,
+ * что в Livewire-тест-харнесе поток файла в НЕпустое одиночное поле
+ * ДОБАВЛЯЕТСЯ к существующему состоянию, а не заменяет его, — это
+ * расходится с поведением браузера и не относится к нашему lifecycle-механизму
+ * очистки. Поэтому состояние сначала сбрасывается set('data.image', null).
  *
  * STORAGE::FAKE
  *
- * Каждый тест подменяет диск public на Storage::fake() (в setUp): ни один
- * файл не пишется в реальный storage/app/public, а PHPUnit проверяет
- * assertExists()/assertMissing() именно на подменённом диске. RefreshDatabase
- * работает на SQLite :memory: из phpunit.xml, поэтому рабочая база
- * database/database.sqlite тоже не затрагивается.
+ * Публичный диск подменяется на Storage::fake() в setUp: файлы Git-макета и
+ * старые «products/…» проверяются на подменённом диске, реальный
+ * storage/app/public не затрагивается. Облачный диск подменяется точечно —
+ * только в тестах, где идёт загрузка/удаление (fakeCloudinaryDisk()), иначе
+ * Storage::fake() подменил бы CDN-адаптер и нельзя было бы проверить URL.
+ * RefreshDatabase работает на SQLite :memory: из phpunit.xml, поэтому рабочая
+ * база database/database.sqlite тоже не затрагивается.
  *
  * ФАКОВЫЕ ФАЙЛЫ БЕЗ GD
  *
@@ -75,7 +76,7 @@ class ProductImageUploadTest extends TestCase
 
     private const EGGS_SLUG = 'eggs';
 
-    private const EGGS_NAME = 'Яйца кур';
+    private const CHICKEN_SLUG = 'chicken';
 
     /**
      * Имя и адрес нового товара для проверок создания.
@@ -85,9 +86,19 @@ class ProductImageUploadTest extends TestCase
     private const NEW_SLUG = 'yaitso-derevyannoe';
 
     /**
-     * Загрузки товара живут в этой папке публичного диска.
+     * Каталог загрузок товара.
      */
     private const PRODUCTS_DIRECTORY = 'products';
+
+    /**
+     * Облачное имя файла начинается с этого префикса (см. Product).
+     */
+    private const CLOUDINARY_FILE_PREFIX = 'products/cld-';
+
+    /**
+     * Путь к фотографии Git-макета: такие файлы панель не удаляет никогда.
+     */
+    private const GIT_MANAGED_PATH = 'images/products/egg-c0.jpg';
 
     protected function setUp(): void
     {
@@ -99,7 +110,7 @@ class ProductImageUploadTest extends TestCase
 
         $this->seed(ProductCatalogSeeder::class);
 
-        // Обязательное подменение диска: тесты не должны писать в реальный
+        // Обязательная подмена диска: тесты не должны писать в реальный
         // storage/app/public.
         Storage::fake('public');
     }
@@ -124,13 +135,23 @@ class ProductImageUploadTest extends TestCase
     }
 
     /**
-     * Товар с существующим файлом изображения на (fake) публичном диске.
+     * Подмена облачного диска: загрузка не уходит в сеть.
      */
-    private function productWithImage(string $relativePath = 'products/old-image.jpg'): Product
+    private function fakeCloudinaryDisk(): void
     {
+        Storage::fake('cloudinary');
+    }
+
+    /**
+     * Товар с существующим управляемым файлом изображения на диске.
+     */
+    private function productWithImage(
+        string $relativePath = 'products/old-image.jpg',
+        string $disk = 'public',
+    ): Product {
         $product = $this->productIn($this->eggs());
 
-        Storage::disk('public')->put($relativePath, 'старые байты изображения');
+        Storage::disk($disk)->put($relativePath, 'старые байты изображения');
 
         $product->forceFill(['image' => $relativePath])->save();
 
@@ -152,61 +173,17 @@ class ProductImageUploadTest extends TestCase
         return UploadedFile::fake()->create('photo.webp', 10, 'image/webp');
     }
 
-    private function fakeText(): UploadedFile
-    {
-        return UploadedFile::fake()->create('notes.txt', 10, 'text/plain');
-    }
-
-    private function oversizedJpeg(): UploadedFile
-    {
-        // 5000 КБ — заведомо больше maxSize(4096).
-        return UploadedFile::fake()->create('too-big.jpg', 5000, 'image/jpeg');
-    }
-
-    /**
-     * Все сообщения ошибок формы одним плоским списком.
-     *
-     * Поле файла описывается правилами «image.*», поэтому ключ ошибки —
-     * «image.0», а не «image»: не привязываем проверки к конкретной
-     * раскладке ключей и просто собираем все тексты.
-     *
-     * @return list<string>
-     */
-    private function allErrorMessages(Testable $component): array
-    {
-        $messages = [];
-
-        foreach (array_keys($component->errors()->getMessages()) as $key) {
-            foreach ($component->errors()->get($key) as $message) {
-                $messages[] = $message;
-            }
-        }
-
-        return $messages;
-    }
-
     /*
     |--------------------------------------------------------------------------
     | 1. Конфигурация поля
     |--------------------------------------------------------------------------
     */
 
-    /**
-     * В форме товара НЕТ компонента загрузки файла.
-     *
-     * Фотографии каталога лежат в public/images/products и обновляются через
-     * Git. Загрузка через панель писала бы путь на временный диск storage,
-     * который не переживает деплой, поэтому её убрали целиком — иначе
-     * администратор увидел бы «успешную» загрузку, исчезающую при
-     * следующем развёртывании.
-     *
-     * Полное обоснование с измерениями — в шапке ProductForm.
-     */
-    public function test_the_form_has_no_file_upload_component(): void
+    public function test_the_form_has_a_cloudinary_file_upload_component(): void
     {
         $this->actingAsAdmin();
 
-        $form = Livewire::test(EditProduct::class, ['record' => $this->productIn($this->eggs())->getKey()])
+        $form = Livewire::test(CreateProduct::class)
             ->instance()
             ->getSchema('form');
 
@@ -217,43 +194,21 @@ class ProductImageUploadTest extends TestCase
             $components,
         );
 
-        $this->assertContains(
-            'image_path',
-            $fieldNames,
-            'Показ пути к фотографии должен остаться: администратору нужно видеть, что прописано у товара.',
-        );
+        $this->assertContains('image', $fieldNames, 'Поле image в форме должно быть.');
+        $this->assertNotContains('image_path', $fieldNames, 'Показ пути заменён загрузкой.');
 
-        $this->assertNotContains(
-            'image',
-            $fieldNames,
-            'Поля image в форме быть не должно.',
-        );
+        $upload = $form->getComponent('image');
 
-        $hasFileUpload = false;
-
-        foreach ($components as $component) {
-            if ($component instanceof FileUpload) {
-                $hasFileUpload = true;
-                break;
-            }
-        }
-
-        $this->assertFalse($hasFileUpload, 'В форме не должно быть компонента загрузки файлов.');
+        $this->assertInstanceOf(FileUpload::class, $upload);
+        $this->assertSame('cloudinary', $upload->getDiskName());
+        $this->assertSame(self::PRODUCTS_DIRECTORY, $upload->getDirectory());
+        $this->assertSame(5120, $upload->getMaxSize());
     }
 
     /*
     |--------------------------------------------------------------------------
     | 2. Создание товара
     |--------------------------------------------------------------------------
-    |
-    | Загрузка через панель отключена (см. раздел 1), поэтому файл НЕ может
-    | попасть в products.image из интерфейса. Проверяется обратное: попытка
-    | загрузить файл не создаёт ни путь в базе, ни файл на диске.
-    |
-    | Это и есть требование этапа: новые production-загрузки не должны
-    | создавать ложное ощущение постоянного хранения. Временный диск
-    | storage/app/public не переживает деплой, поэтому «успешная» загрузка
-    | была бы обещанием, которое не сдержится.
     */
 
     public function test_creating_without_an_image_leaves_image_null(): void
@@ -266,31 +221,16 @@ class ProductImageUploadTest extends TestCase
                 'name' => self::NEW_NAME,
                 'slug' => self::NEW_SLUG,
             ])
-            ->call('create');
+            ->call('create')
+            ->assertHasNoFormErrors();
 
         $this->assertNull(Product::query()->where('slug', self::NEW_SLUG)->firstOrFail()->image);
     }
 
-    /**
-     * Попытка загрузить файл не сохраняет путь в базу, и страница не
-     * ссылается на временный файл.
-     *
-     * ОГРАНИЧЕНИЕ ХАРНЕСА, важное для честности теста. Браузер не даст
-     * выбрать файл в заблокированном поле, поэтому в реальной панели
-     * загрузка невозможна. Но fillForm() в Livewire-тесте подставляет файл
-     * в состояние напрямую, минуя disabled(), и Filament успевает положить
-     * его на диск. Ловить здесь «файла нет на диске» бессмысленно: это
-     * проверяет не код проекта, а возможности тест-харнеса.
-     *
-     * Поэтому проверяется ровно то, что зависит от проекта: путь не попал в
-     * products.image, а публичная страница не ссылается на временный файл.
-     * Независимо от того, остался ли файл на диске, он не связан ни с одной
-     * карточкой и исчезнет вместе с деплоем — вреда посетителю он не
-     * приносит.
-     */
-    public function test_an_upload_attempt_through_create_stores_no_path_and_renders_no_broken_link(): void
+    public function test_creating_with_an_image_stores_a_cloudinary_path(): void
     {
         $this->actingAsAdmin();
+        $this->fakeCloudinaryDisk();
 
         Livewire::test(CreateProduct::class)
             ->fillForm([
@@ -299,37 +239,55 @@ class ProductImageUploadTest extends TestCase
                 'slug' => self::NEW_SLUG,
                 'image' => $this->fakeJpeg(),
             ])
-            ->call('create');
+            ->call('create')
+            ->assertHasNoFormErrors();
 
         $product = Product::query()->where('slug', self::NEW_SLUG)->firstOrFail();
 
-        // Товар создаётся, но загрузка игнорируется: поле заблокировано.
-        $this->assertNull(
-            $product->image,
-            'Заблокированное поле не должно писать путь в базу.',
+        $this->assertNotNull($product->image);
+        $this->assertStringStartsWith(self::CLOUDINARY_FILE_PREFIX, $product->image);
+        $this->assertTrue(
+            Storage::disk('cloudinary')->exists($product->image),
+            'Файл должен переехать на диск cloudinary.',
         );
+    }
 
-        $this->get('/products/'.self::EGGS_SLUG)
-            ->assertOk()
-            ->assertDontSee('/storage/products/')
-            ->assertDontSee('products/01')
-            ->assertDontSee('01M', false);
+    public function test_png_and_webp_images_are_accepted(): void
+    {
+        $this->actingAsAdmin();
+        $this->fakeCloudinaryDisk();
+
+        $uploads = [
+            'yaitso-png' => $this->fakePng(),
+            'yaitso-webp' => $this->fakeWebp(),
+        ];
+
+        foreach ($uploads as $slug => $file) {
+            Livewire::test(CreateProduct::class)
+                ->fillForm([
+                    'product_category_id' => $this->eggs()->getKey(),
+                    'name' => 'Товар '.$slug,
+                    'slug' => $slug,
+                    'image' => $file,
+                ])
+                ->call('create')
+                ->assertHasNoFormErrors();
+
+            $product = Product::query()->where('slug', $slug)->firstOrFail();
+
+            $this->assertStringStartsWith(self::CLOUDINARY_FILE_PREFIX, $product->image);
+            $this->assertTrue(Storage::disk('cloudinary')->exists($product->image));
+        }
     }
 
     /*
     |--------------------------------------------------------------------------
     | 3. Путь в базе
     |--------------------------------------------------------------------------
-    |
-    | Загрузки через панель нет, поэтому единственный источник пути —
-    | ProductCatalogSeeder: он кладёт относительный путь ВНУТРИ public/.
-    | Такие пути переживают смену домена и не врут о способе отдачи файла.
     */
 
     public function test_the_database_never_stores_absolute_paths_or_public_urls(): void
     {
-        $this->seed(ProductCatalogSeeder::class);
-
         foreach (Product::whereNotNull('image')->get() as $product) {
             $image = $product->image;
 
@@ -344,8 +302,6 @@ class ProductImageUploadTest extends TestCase
 
     public function test_seeded_image_paths_point_at_files_that_exist_in_public(): void
     {
-        $this->seed(ProductCatalogSeeder::class);
-
         // Ссылка на несуществующий файл молча превратилась бы в битую
         // картинку: путь в базе и файл в репозитории обязаны совпадать.
         foreach (Product::whereNotNull('image')->get() as $product) {
@@ -359,13 +315,6 @@ class ProductImageUploadTest extends TestCase
     |--------------------------------------------------------------------------
     */
 
-    /**
-     * Фотографии каталога лежат в public/images/products и отслеживаются
-     * Git, поэтому страница строит ссылку через asset(). Загрузка через
-     * панель отключена: путь вида «products/<ulid>.jpg» указывал бы на
-     * storage/app/public, asset() дал бы 404, а на production локальный диск
-     * *всё равно* не пережил бы деплой.
-     */
     public function test_the_public_page_renders_a_git_managed_photo_as_an_asset_url(): void
     {
         $this->actingAsAdmin();
@@ -373,27 +322,64 @@ class ProductImageUploadTest extends TestCase
         $product = $this->productIn($this->eggs());
 
         // Seeder уже положил в image путь внутри public/.
-        $this->assertSame('images/products/egg-c0.jpg', $product->image);
+        $this->assertSame(self::GIT_MANAGED_PATH, $product->image);
 
         $this->get('/products/'.self::EGGS_SLUG)
             ->assertOk()
-            ->assertSee('src="'.asset('images/products/egg-c0.jpg').'"', false);
+            ->assertSee('src="'.asset(self::GIT_MANAGED_PATH).'"', false);
     }
 
-    /**
-     * У товара без подтверждённой фотографии остаётся заглушка. Товар без фото
-     * в каталоге один — «Другие продукты» в категории мяса.
-     */
+    public function test_a_cloudinary_photo_is_rendered_through_the_cdn(): void
+    {
+        $this->actingAsAdmin();
+
+        config(['filesystems.disks.cloudinary.cloud_name' => 'test-cloud']);
+        Storage::forgetDisk('cloudinary');
+
+        $path = 'products/cld-render-test.jpg';
+
+        $product = $this->productIn($this->eggs());
+        $product->forceFill(['image' => $path])->save();
+
+        $expected = 'https://res.cloudinary.com/test-cloud/image/upload/'.$path;
+
+        $this->get('/products/'.self::EGGS_SLUG)
+            ->assertOk()
+            ->assertSee('src="'.$expected.'"', false);
+    }
+
+    public function test_a_cloudinary_photo_falls_back_to_public_disk_without_configuration(): void
+    {
+        $this->actingAsAdmin();
+
+        config([
+            'filesystems.disks.cloudinary.cloud_name' => null,
+            'filesystems.disks.cloudinary.url' => null,
+        ]);
+        Storage::forgetDisk('cloudinary');
+
+        $path = 'products/cld-render-test.jpg';
+
+        $product = $this->productIn($this->eggs());
+        $product->forceFill(['image' => $path])->save();
+
+        $expected = Storage::disk('public')->url($path);
+
+        $this->get('/products/'.self::EGGS_SLUG)
+            ->assertOk()
+            ->assertSee('src="'.$expected.'"', false);
+    }
+
     public function test_a_product_without_an_image_still_uses_the_placeholder(): void
     {
         $this->actingAsAdmin();
 
-        $chicken = ProductCategory::query()->where('slug', 'chicken')->firstOrFail();
+        $chicken = ProductCategory::query()->where('slug', self::CHICKEN_SLUG)->firstOrFail();
         $withoutPhoto = $chicken->products()->where('name', 'Другие продукты')->firstOrFail();
 
         $this->assertNull($withoutPhoto->image);
 
-        $this->get('/products/chicken')
+        $this->get('/products/'.self::CHICKEN_SLUG)
             ->assertOk()
             ->assertSee('aria-hidden="true"', false)
             ->assertDontSee('/storage/products/');
@@ -401,20 +387,68 @@ class ProductImageUploadTest extends TestCase
 
     /*
     |--------------------------------------------------------------------------
-    | 5. Фотографию из панели изменить нельзя
+    | 5. Жизненный цикл файла: замена и очистка
     |--------------------------------------------------------------------------
-    |
-    | Поле image заблокировано, поэтому ни замена, ни очистка невозможны.
-    | Это и проверяется: правка других полей не должна трогать ни путь в
-    | базе, ни файл каталога.
-    |
-    | Раньше здесь проверялся lifecycle замены файла (beforeSave/afterSave на
-    | странице EditProduct). Для загрузки с панели он больше не нужен: файлы
-    | каталога лежат в public/images/products и отслеживаются Git, а
-    | обслуживаются только деплоем. Код EditProduct оставлен — он нужен для
-    | перехода на постоянное хранилище, и его безопасность проверяется в
-    | ProductImageOrphanOnUpdateFailureTest.
     */
+
+    public function test_replacing_an_image_deletes_the_old_managed_file(): void
+    {
+        $this->actingAsAdmin();
+
+        $product = $this->productWithImage('products/old-image.jpg');
+
+        Storage::disk('public')->assertExists('products/old-image.jpg');
+
+        Livewire::test(EditProduct::class, ['record' => $product->getKey()])
+            ->set('data.image', null)
+            ->fillForm([
+                'image' => ['new-key' => 'products/cld-new-image.jpg'],
+            ])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('products/cld-new-image.jpg', $product->fresh()->image);
+        Storage::disk('public')->assertMissing('products/old-image.jpg');
+    }
+
+    public function test_clearing_an_image_deletes_the_old_managed_file_and_sets_null(): void
+    {
+        $this->actingAsAdmin();
+
+        $product = $this->productWithImage('products/old-image.jpg');
+
+        Storage::disk('public')->assertExists('products/old-image.jpg');
+
+        Livewire::test(EditProduct::class, ['record' => $product->getKey()])
+            ->set('data.image', null)
+            ->fillForm(['image' => null])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertNull($product->fresh()->image);
+        Storage::disk('public')->assertMissing('products/old-image.jpg');
+    }
+
+    public function test_replacing_an_image_does_not_touch_a_git_managed_file(): void
+    {
+        $this->actingAsAdmin();
+
+        $product = $this->productIn($this->eggs());
+
+        $this->assertSame(self::GIT_MANAGED_PATH, $product->image);
+
+        Livewire::test(EditProduct::class, ['record' => $product->getKey()])
+            ->set('data.image', null)
+            ->fillForm([
+                'image' => ['new-key' => 'products/cld-new-image.jpg'],
+            ])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        // Файл каталога лежит в public/images/products и отслеживается Git:
+        // он не управляемый, поэтому уборкой не трогается.
+        $this->assertFileExists(public_path(self::GIT_MANAGED_PATH));
+    }
 
     public function test_editing_other_fields_leaves_the_seeded_path_untouched(): void
     {
@@ -422,86 +456,68 @@ class ProductImageUploadTest extends TestCase
 
         $product = $this->productIn($this->eggs());
 
-        $this->assertSame('images/products/egg-c0.jpg', $product->image);
-
         Livewire::test(EditProduct::class, ['record' => $product->getKey()])
             ->fillForm(['name' => 'Переименованный товар'])
-            ->call('save');
+            ->call('save')
+            ->assertHasNoFormErrors();
 
         $this->assertSame(
-            'images/products/egg-c0.jpg',
+            self::GIT_MANAGED_PATH,
             $product->fresh()->image,
             'Правка названия не должна стирать путь к фотографии каталога.',
         );
-    }
-
-    public function test_an_attempt_to_replace_the_path_through_the_panel_is_ignored(): void
-    {
-        $this->actingAsAdmin();
-
-        $product = $this->productIn($this->eggs());
-
-        Livewire::test(EditProduct::class, ['record' => $product->getKey()])
-            ->fillForm(['image' => ['images/products/tushka-kuritsy.jpg']])
-            ->call('save');
-
-        $this->assertSame(
-            'images/products/egg-c0.jpg',
-            $product->fresh()->image,
-            'Заблокированное поле не должно подменять фотографию товара.',
-        );
-    }
-
-    public function test_an_attempt_to_clear_the_path_through_the_panel_is_ignored(): void
-    {
-        $this->actingAsAdmin();
-
-        $product = $this->productIn($this->eggs());
-
-        Livewire::test(EditProduct::class, ['record' => $product->getKey()])
-            ->fillForm(['image' => null])
-            ->call('save');
-
-        $this->assertSame(
-            'images/products/egg-c0.jpg',
-            $product->fresh()->image,
-            'Путь не должен обнуляться из панели: файл остаётся в репозитории.',
-        );
-    }
-
-    public function test_the_admin_panel_never_deletes_files_from_the_public_directory(): void
-    {
-        $this->actingAsAdmin();
-
-        $product = $this->productIn($this->eggs());
-
-        $before = public_path($product->image);
-
-        $this->assertFileExists($before);
-
-        Livewire::test(EditProduct::class, ['record' => $product->getKey()])
-            ->fillForm(['name' => 'Переименованный товар'])
-            ->call('save');
-
-        // Файл каталога лежит в public/, а cleanup EditProduct умеет удалять
-        // только «products/…» на диске storage. Страховка от того, что
-        // фотография из репозитория исчезнет при правке карточки.
-        $this->assertFileExists($before, 'Правка товара не должна удалять файл из public/.');
+        $this->assertFileExists(public_path(self::GIT_MANAGED_PATH));
     }
 
     /*
     |--------------------------------------------------------------------------
-    | 6. Удаление по-прежнему закрыто
+    | 6. Удаление товара уносит управляемый файл
     |--------------------------------------------------------------------------
     */
 
-    public function test_delete_action_and_bulk_delete_remain_unavailable(): void
+    public function test_deleting_a_product_removes_its_cloudinary_file(): void
+    {
+        $this->actingAsAdmin();
+        $this->fakeCloudinaryDisk();
+
+        $product = $this->productWithImage('products/cld-delete-me.jpg', 'cloudinary');
+
+        Storage::disk('cloudinary')->assertExists('products/cld-delete-me.jpg');
+
+        $product->delete();
+
+        Storage::disk('cloudinary')->assertMissing('products/cld-delete-me.jpg');
+        $this->assertDatabaseMissing('products', ['id' => $product->getKey()]);
+    }
+
+    public function test_deleting_a_product_removes_its_legacy_managed_file(): void
     {
         $this->actingAsAdmin();
 
-        $product = $this->productWithImage();
+        $product = $this->productWithImage('products/legacy-delete-me.jpg', 'public');
 
-        $this->assertFalse(ProductResource::canDelete($product));
-        $this->assertFalse(ProductResource::canDeleteAny());
+        Storage::disk('public')->assertExists('products/legacy-delete-me.jpg');
+
+        $product->delete();
+
+        Storage::disk('public')->assertMissing('products/legacy-delete-me.jpg');
+    }
+
+    public function test_deleting_a_product_never_removes_a_git_managed_file(): void
+    {
+        $this->actingAsAdmin();
+
+        $product = $this->productIn($this->eggs());
+
+        $product->forceFill(['image' => self::GIT_MANAGED_PATH])->save();
+
+        $this->assertFileExists(public_path(self::GIT_MANAGED_PATH));
+
+        $product->fresh()->delete();
+
+        $this->assertFileExists(
+            public_path(self::GIT_MANAGED_PATH),
+            'Удаление товара не должно трогать файл Git-макета.',
+        );
     }
 }

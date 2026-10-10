@@ -31,7 +31,7 @@ final class ProductCatalogSchemaTest extends TestCase
         $this->assertTrue(Schema::hasTable('product_categories'));
 
         $this->assertTrue(Schema::hasColumns('product_categories', [
-            'id', 'name', 'slug', 'is_active', 'sort_order', 'created_at', 'updated_at',
+            'id', 'name', 'slug', 'description', 'is_active', 'sort_order', 'created_at', 'updated_at',
         ]));
     }
 
@@ -48,11 +48,12 @@ final class ProductCatalogSchemaTest extends TestCase
 
     public function test_it_does_not_add_unconfirmed_fields_to_product_categories(): void
     {
-        // SEO, hero, изображения и описания заказчиком не подтверждены,
-        // поэтому таких колонок в схеме быть не должно.
+        // SEO, hero и изображения заказчиком не подтверждены, поэтому таких
+        // колонок в схеме быть не должно. description — подтверждённое поле
+        // администратором в панели, поэтому колонка допустима.
         $unconfirmed = [
             'meta_title', 'meta_description', 'hero_image', 'image', 'image_alt',
-            'description', 'intro', 'eyebrow',
+            'intro', 'eyebrow',
         ];
 
         foreach ($unconfirmed as $column) {

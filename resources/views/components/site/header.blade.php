@@ -1,4 +1,6 @@
 @php
+    use App\Support\Settings;
+
     $navigation = $navigation();
     $cta = $cta();
 @endphp
@@ -10,7 +12,7 @@
                 href="{{ $homeUrl() }}"
                 class="text-body font-bold tracking-tight text-ink no-underline transition-colors duration-200 hover:text-primary"
             >
-                {{ config('site.name') }}
+                {{ Settings::value('company_name') }}
             </a>
 
             <nav class="hidden lg:block" aria-label="Основная навигация">

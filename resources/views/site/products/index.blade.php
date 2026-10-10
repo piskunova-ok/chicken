@@ -9,14 +9,15 @@
         база            -> какие категории активны (App\Http\Controllers\
                           ProductIndexController);
         config/site.php -> название, описание, фотография, alt, подпись
-                          кнопки и имя маршрута;
+                          кнопки и имя маршрута (для категорий eggs/chicken);
         config/content.php -> вступление и тексты блоков страницы.
 
-    Третьих категорий здесь быть не может: список строится из
-    config/site.php, а не из таблицы, поэтому категория, добавленная в база
-    без записи в конфиге, на эту страницу не попадёт. Категория, отключённая
-    в базе, исчезнет, но её адрес останется рабочим правилом и по-прежнему
-    отдаст 404 — как и до появления этой страницы.
+    Список строится по активным категориям из базы. Для категорий eggs и
+    chicken у записи находятся данные в config/site.php (фото, описание,
+    CTA); категория, добавленная в админке без записи в конфиге, тоже
+    выводится — без фотографии и с описанием из своей записи. Категория,
+    отключённая в базе, исчезает, а её адрес по-прежнему отдаёт 404
+    (маршрут выбирает только активные).
 
     Композиция повторяет блок «Продукция» главной (две карточки 50/50, на
     мобильных друг под другом), только карточки здесь крупнее и ведут в
@@ -24,6 +25,8 @@
     строки, а не один и тот же текст, поэтому дублирования не видно.
 --}}
 @php
+    use App\Support\Settings;
+
     $intro = (array) config('content.intro', []);
 
     $breadcrumbs = [
@@ -33,7 +36,7 @@
 @endphp
 
 <x-layouts.app
-    :title="'Продукция — '.config('site.name')"
+    :title="'Продукция — '.Settings::value('company_name')"
     :description="$intro['lead'] ?? config('site.meta.description')"
 >
     {{-- ============================ HERO ============================ --}}
@@ -86,12 +89,14 @@
             <div class="mt-10 grid gap-6 md:grid-cols-2">
                 @foreach ($categories as $category)
                     <article class="relative flex h-full flex-col overflow-hidden rounded-card border border-line bg-canvas shadow-soft hover:border-primary/40">
-                        <x-media
-                            :src="asset($category['image'])"
-                            :alt="$category['image_alt']"
-                            variant="card"
-                            ratio="16/9"
-                        />
+                        @if (filled($category['image'] ?? null))
+                            <x-media
+                                :src="asset($category['image'])"
+                                :alt="($category['image_alt'] ?? null) ?: $category['name']"
+                                variant="card"
+                                ratio="16/9"
+                            />
+                        @endif
 
                         <div class="flex flex-1 flex-col p-6 lg:p-7">
                             <h2 class="text-h2 text-ink">
@@ -105,14 +110,16 @@
                                 @endif
                             </h2>
 
-                            <p class="mt-3 text-body text-ink-muted">
-                                {{ $category['description'] }}
-                            </p>
+                            @if (filled($category['description'] ?? null))
+                                <p class="mt-3 text-body text-ink-muted">
+                                    {{ $category['description'] }}
+                                </p>
+                            @endif
 
                             <x-route-button
                                 class="relative z-10 mt-auto self-start pt-6"
                                 :label="$category['cta']"
-                                :route="$category['route']"
+                                :href="$category['url']"
                             />
                         </div>
                     </article>

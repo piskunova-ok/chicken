@@ -41,6 +41,23 @@ return [
         'access_key' => env('WEB3FORMS_ACCESS_KEY'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Cloudinary
+    |--------------------------------------------------------------------------
+    |
+    | Облачное хранилище фотографий, загружаемых из админки. Те же переменные
+    | окружения, что и в config/filesystems.php (диск "cloudinary"). На Render
+    | задаются в панели; локально — в .env.
+    |
+    */
+
+    'cloudinary' => [
+        'cloud_name' => env('CLOUDINARY_CLOUD_NAME'),
+        'api_key' => env('CLOUDINARY_API_KEY'),
+        'api_secret' => env('CLOUDINARY_API_SECRET'),
+    ],
+
     'ses' => [
         'key' => env('AWS_ACCESS_KEY_ID'),
         'secret' => env('AWS_SECRET_ACCESS_KEY'),

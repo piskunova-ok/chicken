@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Products\Schemas;
 
 use App\Models\Product;
-use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -13,6 +13,8 @@ use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Unique;
 
 /**
@@ -84,6 +86,19 @@ class ProductForm
             'exists' => 'Выбранной категории больше нет.',
             'unique' => 'В выбранной категории уже есть товар с таким адресом.',
         ];
+    }
+
+    /**
+     * Имя загруженного файла: «cld-<ulid>.<расширение>».
+     *
+     * Префикс cld- — маркер облачной загрузки (см. Product::CLOUDINARY_PREFIX).
+     * Расширение берётся из имени файла; если его нет — по содержимому.
+     */
+    private static function uploadedImageFileName(UploadedFile $file): string
+    {
+        $extension = $file->getClientOriginalExtension() ?: strtolower((string) $file->guessExtension());
+
+        return Product::CLOUDINARY_PREFIX.Str::ulid().($extension !== '' ? '.'.$extension : '');
     }
 
     public static function configure(Schema $schema): Schema
@@ -199,48 +214,41 @@ class ProductForm
                     ->validationMessages(self::validationMessages()),
 
                 /*
-                 * ФОТОГРАФИЯ — ТОЛЬКО ПОКАЗ, ЗАГРУЗКИ НЕТ
+                 * ФОТОГРАФИЯ — ЗАГРУЗКА В CLOUDINARY
                  *
-                 * Фотографии каталога лежат в public/images/products,
-                 * отслеживаются Git и отдаются как статические файлы, а
-                 * страница строит ссылку через asset(). Поэтому здесь НЕ
-                 * FileUpload, а Placeholder: он показывает текущий путь и
-                 * ничего не пишет.
+                 * Файл уезжает в облачный диск 'cloudinary' (каталог
+                 * products) и получает имя «cld-<ulid>.<ext>». Префикс cld-
+                 * — не украшение, а маркер: по нему Product::imageUrl()
+                 * строит ссылку с CDN, а уборка файлов выбирает диск (см.
+                 * isCloudinaryImagePath / diskNameForPath). Без префикса
+                 * облачный путь был бы неотличим от старой local-загрузки
+                 * «products/<ulid>.<ext>».
                  *
-                 * Почему не загрузка (всё это проверено тестами):
+                 * fetchFileInformation(false): превью строится по URL диска,
+                 * без запросов размера/типа файла к админ-API Cloudinary.
+                 * Так форма работает и до настройки переменных окружения.
                  *
-                 *  - путь вида «products/<ulid>.jpg» указывает на
-                 *    storage/app/public, а не на public/, поэтому asset()
-                 *    дал бы /products/<ulid>.jpg и 404;
-                 *  - на production локальный диск не переживает деплой:
-                 *    фото исчезло бы, и администратор увидел бы
-                 *    «успешную» загрузку, которой уже нет;
-                 *  - даже заблокированный FileUpload не удерживал порядок
-                 *    событий: файл попадал на диск, но путь в базу не
-                 *    записывался, и уборка при сбое записи не находила его,
-                 *    оставляя висящий файл. Именно поэтому поле заменено, а
-                 *    не просто заблокировано.
+                 * Старые пути двух видов остаются читаться без изменений:
+                 * imageUrl() сам различает products/cld-, products/ и
+                 * images/products по внешнему виду значения.
                  *
-                 * Так загрузку нельзя случайно сломать и нельзя выдать за
-                 * рабочую: в форме её просто нет.
-                 *
-                 * Placeholder не обезвоживается, поэтому правка других полей
-                 * товара не стирает путь к фотографии — раньше рабочий
-                 * FileUpload обнулял его, потому что файла не было на диске.
-                 *
-                 * Пустое значение — это честное «нет фотографии», а не пустая
-                 * картинка: страница в этом случае показывает заглушку.
-                 *
-                 * Постоянное хранилище (S3) намеренно НЕ подключено: это
-                 * отдельное решение с отдельными последствиями для бэкапов и
-                 * стоимости. Когда появится — вернётся рабочая загрузка.
+                 * Если запись меняется без замены фото (правка текстов),
+                 * путь к файлу остаётся в БД как был: FileUpload не трогает
+                 * уже сохранённый строковый путь.
                  */
-                Placeholder::make('image_path')
+                FileUpload::make('image')
                     ->label('Фотография')
-                    ->content(fn (?Product $record): string => $record?->image
-                        ?? 'Не задана — на странице выводится заглушка.')
+                    ->disk('cloudinary')
+                    ->directory('products')
+                    ->image()
+                    ->maxSize(5120)
+                    ->fetchFileInformation(false)
+                    // Имя — только базовая часть файла: «cld-…», каталог
+                    // уже добавлен директорией products/, и в базе осядет
+                    // путь «products/cld-<ulid>.<ext>».
+                    ->getUploadedFileNameUsing(fn (UploadedFile $file): string => self::uploadedImageFileName($file))
                     ->columnSpanFull()
-                    ->helperText('Фотографии хранятся в public/images/products и обновляются через Git: файл попадает на сервер обычным деплоем и не исчезает при следующем развёртывании. Загрузка из панели отключена намеренно.'),
+                    ->helperText('Фото загружается в облако Cloudinary и показывается в карточке товара. Действующая фотография удаляется только вместе с товаром.'),
 
                 Textarea::make('short_description')
                     ->label('Краткое описание')

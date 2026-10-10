@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\ProductCategories\Tables;
 
+use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -86,16 +87,17 @@ class ProductCategoriesTable
              */
             ->defaultKeySort()
             ->recordActions([
-                // Единственное действие над записью — открыть её на
-                // редактирование. Ни удаления, ни просмотра во вкладке.
+                // Открыть на правку или удалить категорию. Удаление — только
+                // у записи без товаров: кнопку прячет canDelete() в ресурсе,
+                // а база страхует restrictOnDelete.
                 EditAction::make(),
+                DeleteAction::make(),
             ])
             ->toolbarActions([
                 // Групповых действий нет намеренно. canDeleteAny() уже
                 // скрывает удаление, но пустой списокToolbarActions
                 // означает и то, что панель групповых действий не
-                // отрисуется вовсе: защита должна быть видна и в вёрстке,
-                // а не только в политике.
+                // отрисуется вовсе: удаление категории — только по одной.
             ]);
     }
 }
