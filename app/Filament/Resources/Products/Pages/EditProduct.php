@@ -171,7 +171,20 @@ class EditProduct extends EditRecord
             return;
         }
 
-        Storage::disk(Product::diskNameForPath($previousImage))->delete($previousImage);
+        /*
+         * Диск 'cloudinary' настроен с throw => true (см. config/filesystems.php):
+         * сбой загрузки НОВОГО файла обязан валить сохранение явно, а не
+         * прятаться. Но уборка СТАРОГО файла — второстепенна: к этому
+         * моменту запись уже успешно обновлена, и ошибка удаления (сеть,
+         * временная недоступность Cloudinary API) не должна превращать
+         * успешное сохранение в 500-ю. Поэтому удаление здесь best-effort,
+         * как и в событии deleting модели Product.
+         */
+        try {
+            Storage::disk(Product::diskNameForPath($previousImage))->delete($previousImage);
+        } catch (Throwable) {
+            // Успешное сохранение важнее неудачной уборки старого файла.
+        }
     }
 
     /**

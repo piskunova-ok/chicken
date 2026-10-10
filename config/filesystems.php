@@ -71,6 +71,20 @@ return [
         | вернёт понятную ошибку — локальные пути products/* продолжают
         | отдаваться со старого public-диска.
         |
+        | throw => true — НАМЕРЕННО, а не по умолчанию.
+        |
+        | Со значением false (как у local/public/s3) Laravel перехватывает
+        | UnableToWriteFile, пишет лог только при report => true и
+        | возвращает false. Тогда сбой загрузки в Cloudinary становится
+        | невидимым: Livewire TemporaryUploadedFile::storeAs() (вендор)
+        | игнорирует возврат put() и всё равно отдаёт путь, Filament пишет
+        | «products/cld-…» в products.image, а в Cloudinary файла нет. Ровно
+        | это и выглядело как «фото выбрано, товар сохранён, но в облаке
+        | ничего нет и в логах пусто».
+        |
+        | С throw => true ошибка записи выбрасывается наружу: сохранение
+        | формы падает с понятной ошибкой, путь в БД НЕ попадает, а причина
+        | (не задан CLOUDINARY_CLOUD_NAME, отказ API, сеть) видна в логах.
         */
 
         'cloudinary' => [
@@ -81,7 +95,7 @@ return [
             'url' => empty(env('CLOUDINARY_CLOUD_NAME'))
                 ? null
                 : rtrim('https://res.cloudinary.com/'.env('CLOUDINARY_CLOUD_NAME'), '/').'/image/upload',
-            'throw' => false,
+            'throw' => true,
             'report' => false,
         ],
 

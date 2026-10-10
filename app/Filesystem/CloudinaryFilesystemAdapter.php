@@ -6,6 +6,7 @@ namespace App\Filesystem;
 
 use Cloudinary\Api\Exception\NotFound;
 use Cloudinary\Cloudinary;
+use Illuminate\Support\Facades\Log;
 use League\Flysystem\Config;
 use League\Flysystem\DirectoryAttributes;
 use League\Flysystem\FileAttributes;
@@ -348,6 +349,18 @@ final class CloudinaryFilesystemAdapter implements FilesystemAdapter
         } catch (UnableToWriteFile $e) {
             throw $e;
         } catch (\Throwable $e) {
+            /*
+             * Безопасная диагностика: в лог уходят только путь назначения и
+             * текст ошибки. Учётные данные (api_key/api_secret) сюда не
+             * попадают: они не входят ни в path, ни в сообщение исключения
+             * Cloudinary. Без этой строки сбой «не задан cloud_name» не
+             * оставлял вообще ничего в логах приложения.
+             */
+            Log::error('Не удалось загрузить файл в Cloudinary.', [
+                'path' => $path,
+                'reason' => $e->getMessage(),
+            ]);
+
             throw UnableToWriteFile::atLocation($path, $e->getMessage(), $e);
         } finally {
             @unlink($temporary);
