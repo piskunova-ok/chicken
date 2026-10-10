@@ -12,9 +12,10 @@ use Filament\Resources\Pages\EditRecord;
  * Редактирование категории продукции.
  *
  * Удаление доступно только пустой категории: canDelete() в ресурсе
- * возвращает !$record->products()->exists(), поэтому кнопка у категории с
- * товарами скрыта (база тот же случай страхует restrictOnDelete). Группового
- * удаления у категорий нет вовсе.
+ * возвращает !$record->products()->exists(), поэтому действие не
+ * регистрируется вовсе — кнопки у категории с товарами нет в панели (база
+ * тот же случай страхует restrictOnDelete). Группового удаления у категорий
+ * нет нигде.
  */
 class EditProductCategory extends EditRecord
 {
@@ -25,8 +26,15 @@ class EditProductCategory extends EditRecord
      */
     protected function getHeaderActions(): array
     {
-        return [
-            DeleteAction::make(),
-        ];
+        $actions = [];
+
+        // canDelete() учитывается здесь, а не видимостью действия: кнопки у
+        // занятой категории не должно быть вообще, а не только в узком
+        // состоянии «не видна в этой сессии запроса».
+        if (ProductCategoryResource::canDelete($this->getRecord())) {
+            $actions[] = DeleteAction::make();
+        }
+
+        return $actions;
     }
 }

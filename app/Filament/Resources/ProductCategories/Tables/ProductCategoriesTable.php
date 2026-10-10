@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\ProductCategories\Tables;
 
+use App\Filament\Resources\ProductCategories\ProductCategoryResource;
+use App\Models\ProductCategory;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Tables\Columns\TextColumn;
@@ -87,11 +89,20 @@ class ProductCategoriesTable
              */
             ->defaultKeySort()
             ->recordActions([
-                // Открыть на правку или удалить категорию. Удаление — только
-                // у записи без товаров: кнопку прячет canDelete() в ресурсе,
-                // а база страхует restrictOnDelete.
+                // Открыть на правку или удалить категорию. Удаление — только у
+                // записи без товаров: visible() прячет кнопку у занятых
+                // категорий, а база страхует тот же случай restrictOnDelete.
+                //
+                // Имя 'deleteCategory' задано явно, хотя у DeleteAction есть
+                // стоковое 'delete'. Группового удаления в таблице нет, но
+                // Filament резолвит действие по имени: запрошенное как bulk
+                // имя 'delete' вернуло бы это строчное действие. Разное имя
+                // держит строчные и групповые действия в разных пространствах.
                 EditAction::make(),
-                DeleteAction::make(),
+                DeleteAction::make('deleteCategory')
+                    ->visible(
+                        fn (ProductCategory $record): bool => ProductCategoryResource::canDelete($record),
+                    ),
             ])
             ->toolbarActions([
                 // Групповых действий нет намеренно. canDeleteAny() уже

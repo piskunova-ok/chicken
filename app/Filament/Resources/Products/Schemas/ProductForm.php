@@ -246,7 +246,7 @@ class ProductForm
                     // Имя — только базовая часть файла: «cld-…», каталог
                     // уже добавлен директорией products/, и в базе осядет
                     // путь «products/cld-<ulid>.<ext>».
-                    ->getUploadedFileNameUsing(fn (UploadedFile $file): string => self::uploadedImageFileName($file))
+                    ->getUploadedFileNameForStorageUsing(fn (UploadedFile $file): string => self::uploadedImageFileName($file))
                     ->columnSpanFull()
                     ->helperText('Фото загружается в облако Cloudinary и показывается в карточке товара. Действующая фотография удаляется только вместе с товаром.'),
 
