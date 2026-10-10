@@ -11,6 +11,7 @@ use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Log;
 use League\Flysystem\Filesystem;
 use League\Flysystem\UnableToWriteFile;
+use ReflectionMethod;
 use ReflectionProperty;
 use RuntimeException;
 use Tests\TestCase;
@@ -75,6 +76,23 @@ class CloudinaryFilesystemAdapterTest extends TestCase
         $property = new ReflectionProperty($adapter, 'cloudinary');
         $property->setAccessible(true);
         $property->setValue($adapter, $client);
+    }
+
+    /**
+     * Адрес, по которому SDK реально загрузит файл: строит настоящий
+     * Cloudinary-клиент адаптера (без подмены) и берёт Upload API URL.
+     *
+     * Сети не касается: getUploadUrl() только склеивает base_uri и endpoint.
+     */
+    private function uploadUrl(CloudinaryFilesystemAdapter $adapter): string
+    {
+        $method = new ReflectionMethod($adapter, 'client');
+        $method->setAccessible(true);
+
+        /** @var Cloudinary $client */
+        $client = $method->invoke($adapter);
+
+        return $client->uploadApi()->getUploadUrl('image', 'upload');
     }
 
     /**
@@ -215,6 +233,64 @@ class CloudinaryFilesystemAdapterTest extends TestCase
         $this->assertTrue(
             (bool) config('filesystems.disks.cloudinary.throw'),
             'Диск cloudinary должен иметь throw => true, иначе сбой загрузки снова станет невидимым.'
+        );
+    }
+
+    /**
+     * ГЛАВНЫЙ РЕГРЕСС: Upload API обязан идти на официальный хост
+     * api.cloudinary.com. Если здесь окажется cloudinary.com или
+     * res.cloudinary.com, upload уйдёт на сайт, который отвечает HTML
+     * «Page not found», и SDK вернёт невнятное
+     * «Error parsing server response (404)».
+     */
+    public function test_the_upload_api_targets_the_official_host(): void
+    {
+        $adapter = new CloudinaryFilesystemAdapter($this->diskConfig(true));
+
+        $url = $this->uploadUrl($adapter);
+
+        $this->assertSame(
+            'https://api.cloudinary.com/v1_1/test-cloud/image/upload',
+            $url,
+            'Upload API должен обращаться к https://api.cloudinary.com/v1_1/<cloud>/image/upload.'
+        );
+    }
+
+    /**
+     * Даже если в окружении окажется CLOUDINARY_URL с параметром
+     * upload_prefix, указывающим на маркетинговый хост, адаптер обязан его
+     * проигнорировать: учётные данные приходят явно, а upload_prefix
+     * фиксируется официальной константой SDK.
+     */
+    public function test_the_upload_api_ignores_a_hostile_cloudinary_url_env(): void
+    {
+        $previous = getenv('CLOUDINARY_URL');
+        putenv('CLOUDINARY_URL=cloudinary://key:secret@test-cloud?upload_prefix=https://cloudinary.com');
+
+        try {
+            $adapter = new CloudinaryFilesystemAdapter($this->diskConfig(true));
+
+            $url = $this->uploadUrl($adapter);
+        } finally {
+            $previous === false
+                ? putenv('CLOUDINARY_URL')
+                : putenv('CLOUDINARY_URL='.$previous);
+        }
+
+        $this->assertSame('api.cloudinary.com', parse_url($url, PHP_URL_HOST));
+        $this->assertStringNotContainsString('res.cloudinary.com', $url);
+        $this->assertNotSame('cloudinary.com', parse_url($url, PHP_URL_HOST));
+    }
+
+    /**
+     * Диск не должен задавать собственный upload_prefix: официальный endpoint
+     * определяется кодом адаптера, а не конфигом.
+     */
+    public function test_the_cloudinary_disk_does_not_configure_a_custom_upload_prefix(): void
+    {
+        $this->assertNull(
+            config('filesystems.disks.cloudinary.upload_prefix'),
+            'Диск cloudinary не должен задавать кастомный upload_prefix.'
         );
     }
 }

@@ -6,6 +6,8 @@ namespace App\Filesystem;
 
 use Cloudinary\Api\Exception\NotFound;
 use Cloudinary\Cloudinary;
+use Cloudinary\Configuration\ApiConfig;
+use Cloudinary\Configuration\Configuration;
 use Illuminate\Support\Facades\Log;
 use League\Flysystem\Config;
 use League\Flysystem\DirectoryAttributes;
@@ -49,6 +51,30 @@ final class CloudinaryFilesystemAdapter implements FilesystemAdapter
      * Cloudinary::__construct() валидирует конфигурацию и бросает исключение,
      * если не задан cloud_name. Поэтому клиент строится только при первом
      * обращении, и диск спокойно резолвится до настройки окружения.
+     *
+     * Конфигурация собирается ЯВНО из трёх стандартных учётных данных
+     * (cloud_name + api_key + api_secret) и передаётся в SDK готовым объектом
+     * Configuration. Так URL Upload API не зависит от того, что ещё лежит в
+     * окружении.
+     *
+     * Зачем это нужно:
+     *
+     *  - Cloudinary\Configuration\Configuration::import() читает переменную
+     *    окружения CLOUDINARY_URL, если конфиг ей НЕ передан. В строке
+     *    CLOUDINARY_URL допускаются query-параметры вида ?upload_prefix=…,
+     *    и «промах» upload_prefix уводит upload на маркетинговый сайт
+     *    cloudinary.com или на res.cloudinary.com. Оба на неизвестный путь
+     *    отдают HTML «Cloudinary - Page not found», а SDK из-за
+     *    не-JSON тела рапортует невнятную ошибку
+     *    «Error parsing server response (404)». Именно это и выглядело как
+     *    «файл не загружается, а в логе непонятный HTML».
+     *
+     *  - Поэтому upload_prefix ЖЁСТКО фиксируется официальной константой
+     *    самого SDK (ApiConfig::DEFAULT_UPLOAD_PREFIX), а не берётся из
+     *    окружения. Это не кастом: это ровно тот endpoint, который SDK
+     *    использует по умолчанию — https://api.cloudinary.com.
+     *
+     * Итоговый адрес загрузки: https://api.cloudinary.com/v1_1/<cloud>/image/upload
      */
     private function client(): Cloudinary
     {
@@ -58,17 +84,24 @@ final class CloudinaryFilesystemAdapter implements FilesystemAdapter
 
         $cloudName = $this->config['cloud_name'] ?? null;
 
-        if (! is_string($cloudName) || $cloudName === '') {
+        if (! is_string($cloudName) || trim($cloudName) === '') {
             throw new RuntimeException(
                 'Cloudinary не настроен: отсутствует переменная окружения CLOUDINARY_CLOUD_NAME.'
             );
         }
 
-        return $this->cloudinary = new Cloudinary([
-            'cloud_name' => $cloudName,
-            'api_key' => $this->config['api_key'] ?? null,
-            'api_secret' => $this->config['api_secret'] ?? null,
+        $configuration = new Configuration([
+            'cloud' => [
+                'cloud_name' => trim($cloudName),
+                'api_key' => $this->config['api_key'] ?? null,
+                'api_secret' => $this->config['api_secret'] ?? null,
+            ],
+            'api' => [
+                'upload_prefix' => ApiConfig::DEFAULT_UPLOAD_PREFIX,
+            ],
         ]);
+
+        return $this->cloudinary = new Cloudinary($configuration);
     }
 
     public function fileExists(string $path): bool
