@@ -31,6 +31,7 @@ final class Settings
     private const FIELDS = [
         'company_name',
         'short_description',
+        'logo',
         'phone',
         'phone_secondary',
         'email',
@@ -77,6 +78,17 @@ final class Settings
         $dbValue = self::$values[$key] ?? null;
 
         return is_string($dbValue) ? $dbValue : null;
+    }
+
+    /**
+     * Публичный адрес логотипа либо null, если он не загружен.
+     *
+     * Путь в базе относительный (brand/cld-…), поэтому готовую ссылку
+     * строит CloudinaryAssets — тем же правилом, что для сертификатов.
+     */
+    public static function logoUrl(): ?string
+    {
+        return CloudinaryAssets::url(self::raw('logo'));
     }
 
     /**
@@ -138,6 +150,9 @@ final class Settings
         return match ($key) {
             'company_name' => config('site.name'),
             'short_description' => config('site.short_description'),
+            // У логотипа нет запасного значения: пока файл не загружен,
+            // шапка показывает название компании, а не картинку-заглушку.
+            'logo' => null,
             'phone' => config('site.contacts.phone'),
             'email' => config('site.contacts.email'),
             'address' => config('site.contacts.address'),

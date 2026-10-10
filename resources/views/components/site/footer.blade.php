@@ -5,6 +5,7 @@
     $legalLinks = $legalLinks();
     $partners = $partners();
     $companyName = Settings::value('company_name');
+    $logoUrl = Settings::logoUrl();
     $contacts = [
         'phone' => Settings::value('phone'),
         'email' => Settings::value('email'),
@@ -25,7 +26,14 @@
         <div class="grid gap-12 py-16 md:grid-cols-2 lg:grid-cols-4 lg:gap-10">
             {{-- Компания --}}
             <div>
-                <p class="text-body font-bold tracking-tight">{{ $companyName }}</p>
+                @if ($logoUrl !== null)
+                    <img
+                        src="{{ $logoUrl }}"
+                        alt="{{ $companyName }}"
+                        class="h-12 w-auto"
+                    >
+                @endif
+                <p class="{{ $logoUrl !== null ? 'mt-4' : '' }} text-body font-bold tracking-tight">{{ $companyName }}</p>
                 <p class="mt-4 max-w-xs text-small text-ink-inverse/70">
                     {{ Settings::value('short_description') }}
                 </p>

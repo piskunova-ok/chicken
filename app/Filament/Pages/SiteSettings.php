@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Filament\Pages;
 
 use App\Models\SiteSetting;
+use App\Support\CloudinaryAssets;
 use App\Support\Settings;
 use Filament\Actions\Action;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -17,6 +19,7 @@ use Filament\Schemas\Components\Form;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Http\UploadedFile;
 
 /**
  * Настройки сайта: страница админки для строки site_settings (id = 1).
@@ -54,6 +57,7 @@ class SiteSettings extends Page
         $this->form->fill([
             'company_name' => Settings::raw('company_name'),
             'short_description' => Settings::raw('short_description'),
+            'logo' => Settings::raw('logo'),
             'phone' => Settings::raw('phone'),
             'phone_secondary' => Settings::raw('phone_secondary'),
             'email' => Settings::raw('email'),
@@ -83,6 +87,22 @@ class SiteSettings extends Page
                             ->rows(3)
                             ->maxLength(500)
                             ->helperText('Подзаголовок на главной и в подвале. Пусто — берётся из конфига.'),
+
+                        FileUpload::make('logo')
+                            ->label('Логотип')
+                            ->disk('cloudinary')
+                            ->directory('brand')
+                            ->image()
+                            ->maxSize(2048)
+                            // Превью строится по URL диска, без обращений к
+                            // админ-API Cloudinary: форма работает и до
+                            // настройки переменных окружения.
+                            ->fetchFileInformation(false)
+                            ->getUploadedFileNameForStorageUsing(
+                                fn (UploadedFile $file): string => CloudinaryAssets::fileName($file),
+                            )
+                            ->columnSpanFull()
+                            ->helperText('PNG, JPG или SVG. Показывается в шапке и подвале вместо названия. Пусто — выводится название компании. Замена и удаление убирают старый файл.'),
                     ]),
 
                 Section::make('Контакты')
@@ -137,7 +157,7 @@ class SiteSettings extends Page
     }
 
     /**
-     * @return array<int, \Filament\Actions\Action>
+     * @return array<int, Action>
      */
     protected function getFormActions(): array
     {
@@ -150,6 +170,13 @@ class SiteSettings extends Page
 
     public function save(): void
     {
+        /*
+         * Старый логотип читается ДО getState(): getState() дегидратирует
+         * форму и сохраняет НОВЫЙ загруженный файл на диск, но значение в
+         * базе меняет только updateOrCreate() ниже.
+         */
+        $previousLogo = Settings::raw('logo');
+
         // getState() проверяет валидацию полей формы.
         $data = $this->form->getState();
 
@@ -157,6 +184,17 @@ class SiteSettings extends Page
 
         // Сброс кэша: следующий публичный запрос увидит новые значения.
         Settings::flush();
+
+        /*
+         * Если логотип заменён или убран, старый файл в Cloudinary больше не
+         * нужен. Уборка best-effort: сохранение уже состоялось, и неудачное
+         * удаление не должно выглядеть как сбой.
+         */
+        $newLogo = is_string($data['logo'] ?? null) ? $data['logo'] : null;
+
+        if ($previousLogo !== null && $previousLogo !== $newLogo) {
+            CloudinaryAssets::delete($previousLogo);
+        }
 
         Notification::make()
             ->title('Настройки сохранены')

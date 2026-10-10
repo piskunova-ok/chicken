@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Model;
 #[Fillable([
     'company_name',
     'short_description',
+    'logo',
     'phone',
     'phone_secondary',
     'email',
@@ -30,6 +31,4 @@ use Illuminate\Database\Eloquent\Model;
     'whatsapp',
     'vk',
 ])]
-class SiteSetting extends Model
-{
-}
+class SiteSetting extends Model {}

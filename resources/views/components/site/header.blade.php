@@ -3,6 +3,8 @@
 
     $navigation = $navigation();
     $cta = $cta();
+    $logoUrl = Settings::logoUrl();
+    $companyName = Settings::value('company_name');
 @endphp
 
 <header class="sticky top-0 z-50 border-b border-line bg-canvas/90 backdrop-blur-sm">
@@ -10,9 +12,17 @@
         <div class="flex min-h-20 items-center justify-between gap-6 py-4">
             <a
                 href="{{ $homeUrl() }}"
-                class="text-body font-bold tracking-tight text-ink no-underline transition-colors duration-200 hover:text-primary"
+                class="inline-flex items-center text-body font-bold tracking-tight text-ink no-underline transition-colors duration-200 hover:text-primary"
             >
-                {{ Settings::value('company_name') }}
+                @if ($logoUrl !== null)
+                    <img
+                        src="{{ $logoUrl }}"
+                        alt="{{ $companyName }}"
+                        class="h-12 w-auto"
+                    >
+                @else
+                    {{ $companyName }}
+                @endif
             </a>
 
             <nav class="hidden lg:block" aria-label="Основная навигация">
