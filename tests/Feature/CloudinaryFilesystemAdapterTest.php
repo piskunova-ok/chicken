@@ -336,4 +336,95 @@ class CloudinaryFilesystemAdapterTest extends TestCase
             'Диск cloudinary не должен задавать кастомный upload_prefix.'
         );
     }
+
+    /**
+     * Загрузка файла с расширением: в Cloudinary уходит public_id БЕЗ
+     * расширения. Для JPEG-подобного .jfif это «products/cld-sample», иначе
+     * Cloudinary завёл бы ассет «products/cld-sample.jfif», которого потом не
+     * найти по каноническому адресу.
+     */
+    public function test_a_jfif_upload_uses_a_public_id_without_the_extension(): void
+    {
+        $config = $this->diskConfig(true);
+        $adapter = new CloudinaryFilesystemAdapter($config);
+
+        $uploadApi = $this->createMock(UploadApi::class);
+        $uploadApi->expects($this->once())
+            ->method('upload')
+            ->with(
+                $this->isString(),
+                $this->callback(
+                    static fn (array $options): bool => ($options['public_id'] ?? null) === 'products/cld-sample'
+                )
+            )
+            ->willReturn(['public_id' => 'products/cld-sample', 'format' => 'jpg', 'secure_url' => 'https://res.cloudinary.com/test-cloud/image/upload/products/cld-sample.jpg']);
+
+        $this->injectClient($adapter, $this->clientWith($uploadApi));
+
+        $storage = $this->storage($adapter, $config);
+
+        $this->assertTrue($storage->put('products/cld-sample.jfif', $this->contentStream()));
+    }
+
+    /**
+     * Delivery-URL строится по каноническому формату Cloudinary, а не по
+     * исходному расширению: .jfif отдаётся как .jpg, иначе Cloudinary
+     * отвечает 404 «Resource not found».
+     */
+    public function test_a_jfif_path_is_delivered_with_the_jpeg_format(): void
+    {
+        $config = $this->diskConfig(true);
+        $adapter = new CloudinaryFilesystemAdapter($config);
+        $storage = $this->storage($adapter, $config);
+
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/products/cld-sample.jpg',
+            $storage->url('products/cld-sample.jfif'),
+        );
+    }
+
+    public function test_a_jpeg_path_is_delivered_with_the_jpg_format(): void
+    {
+        $config = $this->diskConfig(true);
+        $adapter = new CloudinaryFilesystemAdapter($config);
+        $storage = $this->storage($adapter, $config);
+
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/products/cld-sample.jpg',
+            $storage->url('products/cld-sample.jpeg'),
+        );
+    }
+
+    public function test_a_png_path_keeps_its_own_format(): void
+    {
+        $config = $this->diskConfig(true);
+        $adapter = new CloudinaryFilesystemAdapter($config);
+        $storage = $this->storage($adapter, $config);
+
+        $this->assertSame(
+            'https://res.cloudinary.com/test-cloud/image/upload/products/cld-sample.png',
+            $storage->url('products/cld-sample.png'),
+        );
+    }
+
+    /**
+     * Удаление обязано бить по тому же public_id без расширения: именно под ним
+     * ассет и был загружен.
+     */
+    public function test_deleting_a_jfif_path_destroys_the_same_public_id(): void
+    {
+        $config = $this->diskConfig(true);
+        $adapter = new CloudinaryFilesystemAdapter($config);
+
+        $uploadApi = $this->createMock(UploadApi::class);
+        $uploadApi->expects($this->once())
+            ->method('destroy')
+            ->with('products/cld-sample', ['invalidate' => true]);
+
+        $this->injectClient($adapter, $this->clientWith($uploadApi));
+
+        $storage = $this->storage($adapter, $config);
+
+        $storage->delete('products/cld-sample.jfif');
+    }
 }

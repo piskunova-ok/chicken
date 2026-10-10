@@ -36,6 +36,19 @@ final class CloudinaryFilesystemAdapter implements FilesystemAdapter
 {
     private const DEFAULT_BASE_URL = 'https://res.cloudinary.com';
 
+    /**
+     * Расширения JPEG-семейства, которые Cloudinary отдаёт под форматом «jpg».
+     *
+     * Проверено на delivery-API Cloudinary: /image/upload/<id>.jpg и .jpe
+     * отдают image/jpeg, а .jfif — 404 «Resource not found»: формата jfif у
+     * Cloudinary нет. Поэтому .jfif/jpe/jpeg приводим к каноническому jpg.
+     */
+    private const FORMAT_ALIASES = [
+        'jfif' => 'jpg',
+        'jpe' => 'jpg',
+        'jpeg' => 'jpg',
+    ];
+
     private array $config;
 
     private ?Cloudinary $cloudinary = null;
@@ -383,6 +396,18 @@ final class CloudinaryFilesystemAdapter implements FilesystemAdapter
      * Прямая ссылка на изображение в CDN. Не требует обращения к API и работает
      * даже без учётных данных: применяется Laravel/Filament'ом при выводе
      * URL через FilesystemAdapter::url().
+     *
+     * Адрес строится из ПУБЛИЧНОГО ID и КАНОНИЧЕСКОГО формата Cloudinary, а не
+     * из исходного расширения пути. Это принципиально: public_id загружается
+     * без расширения (см. publicId()), а Cloudinary хранит ресурс в своём
+     * формате (для JPEG это «jpg»). Если в URL подставить исходное расширение
+     * (например «.jfif»), Cloudinary вернёт 404 «Resource not found», потому
+     * что ассета с форматом jfif не существует.
+     *
+     *   путь в БД                  публичный id            формат   URL
+     *   products/cld-ABC.jfif  ->  products/cld-ABC    ->  jpg  ->  …/products/cld-ABC.jpg
+     *   products/cld-ABC.jpeg  ->  products/cld-ABC    ->  jpg  ->  …/products/cld-ABC.jpg
+     *   products/cld-ABC.png   ->  products/cld-ABC    ->  png  ->  …/products/cld-ABC.png
      */
     public function getUrl(string $path): string
     {
@@ -392,7 +417,10 @@ final class CloudinaryFilesystemAdapter implements FilesystemAdapter
             ? self::DEFAULT_BASE_URL.'/'.$cloudName.'/image/upload'
             : self::DEFAULT_BASE_URL.'/image/upload';
 
-        return rtrim($base, '/').'/'.ltrim($path, '/');
+        $publicId = $this->publicId($path);
+        $format = $this->deliveryFormat($path);
+
+        return rtrim($base, '/').'/'.$publicId.($format !== '' ? '.'.$format : '');
     }
 
     private function uploadContents(string $path, string $contents): void
@@ -476,6 +504,21 @@ final class CloudinaryFilesystemAdapter implements FilesystemAdapter
         return $path;
     }
 
+    /**
+     * Канонический формат Cloudinary для пути: исходное расширение,
+     * приведённое к тому виду, в котором Cloudinary хранит ресурс.
+     */
+    private function deliveryFormat(string $path): string
+    {
+        $extension = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+
+        if ($extension === '') {
+            return '';
+        }
+
+        return self::FORMAT_ALIASES[$extension] ?? $extension;
+    }
+
     private function formatFromPath(string $path): string
     {
         $format = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
@@ -489,6 +532,7 @@ final class CloudinaryFilesystemAdapter implements FilesystemAdapter
             'jpg' => 'image/jpeg',
             'jpeg' => 'image/jpeg',
             'jpe' => 'image/jpeg',
+            'jfif' => 'image/jpeg',
             'png' => 'image/png',
             'gif' => 'image/gif',
             'webp' => 'image/webp',
