@@ -82,17 +82,52 @@ final class CloudinaryFilesystemAdapter implements FilesystemAdapter
             return $this->cloudinary;
         }
 
-        $cloudName = $this->config['cloud_name'] ?? null;
+        $cloudName = trim((string) ($this->config['cloud_name'] ?? ''));
 
-        if (! is_string($cloudName) || trim($cloudName) === '') {
+        if ($cloudName === '') {
             throw new RuntimeException(
                 'Cloudinary не настроен: отсутствует переменная окружения CLOUDINARY_CLOUD_NAME.'
             );
         }
 
-        $configuration = new Configuration([
+        /*
+         * Имя облака обязано быть «голым» идентификатором. Любой лишний символ
+         * (точка, слэш, пробел, https://…) не меняет хост — upload_prefix
+         * закреплён ниже — но ломает ПУТЬ:
+         *
+         *   cloud_name = "my-cloud"        -> /v1_1/my-cloud/image/upload   (200/400 JSON)
+         *   cloud_name = "my-cloud.com"    -> /v1_1/my-cloud.com/image/upload   (404 HTML)
+         *   cloud_name = "res.cloudinary.com/my-cloud" -> 404 HTML «Page not found»
+         *   cloud_name = "my-cloud/image"  -> /v1_1/my-cloud/image/image/upload (404 HTML)
+         *
+         * Именно 404 с HTML-страницей «Cloudinary - Page not found» и видел
+         * SDK как «Error parsing server response (404)». Поэтому неверное имя
+         * облака отсекаем сразу, с понятным сообщением, а не глухой ошибкой.
+         */
+        if (preg_match('/^[A-Za-z0-9_-]+$/', $cloudName) !== 1) {
+            throw new RuntimeException(sprintf(
+                'CLOUDINARY_CLOUD_NAME задан неверно: %s. Ожидается только имя облака '
+                .'(буквы, цифры, "-", "_"), например "my-cloud", — без URL, слэшей, '
+                .'пробелов и точек. Иначе Upload API уходит на неверный путь и Cloudinary '
+                .'отвечает HTML «Page not found» (404).',
+                $cloudName
+            ));
+        }
+
+        return $this->cloudinary = new Cloudinary($this->configuration());
+    }
+
+    /**
+     * Явная конфигурация SDK: три стандартных учётных данных плюс официальный
+     * хост Upload/Admin API из константы самого SDK. Благодаря этому URL не
+     * зависит от переменной окружения CLOUDINARY_URL и её параметра
+     * upload_prefix.
+     */
+    private function configuration(): Configuration
+    {
+        return new Configuration([
             'cloud' => [
-                'cloud_name' => trim($cloudName),
+                'cloud_name' => trim((string) ($this->config['cloud_name'] ?? '')),
                 'api_key' => $this->config['api_key'] ?? null,
                 'api_secret' => $this->config['api_secret'] ?? null,
             ],
@@ -100,8 +135,6 @@ final class CloudinaryFilesystemAdapter implements FilesystemAdapter
                 'upload_prefix' => ApiConfig::DEFAULT_UPLOAD_PREFIX,
             ],
         ]);
-
-        return $this->cloudinary = new Cloudinary($configuration);
     }
 
     public function fileExists(string $path): bool
@@ -373,6 +406,23 @@ final class CloudinaryFilesystemAdapter implements FilesystemAdapter
         try {
             if (@file_put_contents($temporary, $contents) === false) {
                 throw UnableToWriteFile::atLocation($path, 'Не удалось записать временный файл.');
+            }
+
+            /*
+             * Безопасная диагностика production: в лог уходит ФАКТИЧЕСКИЙ URL
+             * Upload API, который строит SDK, имя облака и версия SDK. Здесь
+             * НЕТ api_key, api_secret и CLOUDINARY_URL целиком — в URL учётных
+             * данных нет. По этой строке в логе Render сразу видно, на какой
+             * адрес реально уходит upload.
+             */
+            $cloudName = trim((string) ($this->config['cloud_name'] ?? ''));
+
+            if ($cloudName !== '') {
+                Log::info('Cloudinary upload: фактический URL Upload API.', [
+                    'upload_url' => (new Cloudinary($this->configuration()))->uploadApi()->getUploadUrl('image'),
+                    'cloud_name' => $cloudName,
+                    'sdk_version' => Cloudinary::VERSION,
+                ]);
             }
 
             $this->client()->uploadApi()->upload($temporary, [

@@ -11,6 +11,7 @@ use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Log;
 use League\Flysystem\Filesystem;
 use League\Flysystem\UnableToWriteFile;
+use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionMethod;
 use ReflectionProperty;
 use RuntimeException;
@@ -254,6 +255,48 @@ class CloudinaryFilesystemAdapterTest extends TestCase
             $url,
             'Upload API должен обращаться к https://api.cloudinary.com/v1_1/<cloud>/image/upload.'
         );
+    }
+
+    /**
+     * Облако с недопустимыми символами (URL, точка, слэш) при закреплённом
+     * upload_prefix НЕ меняет хост, но ломает путь: api.cloudinary.com на
+     * такой путь отвечает HTML «Cloudinary - Page not found» (404), что SDK
+     * показывает как «Error parsing server response (404)». Поэтому такое имя
+     * обязано отсекаться сразу, с понятным сообщением.
+     */
+    #[DataProvider('malformedCloudNames')]
+    public function test_a_malformed_cloud_name_is_rejected_with_a_clear_message(string $cloudName): void
+    {
+        $config = $this->diskConfig(true);
+        $config['cloud_name'] = $cloudName;
+
+        $adapter = new CloudinaryFilesystemAdapter($config);
+
+        Log::spy();
+
+        $storage = $this->storage($adapter, $config);
+
+        try {
+            $storage->put('products/cld-sample.jpg', $this->contentStream());
+            $this->fail('Неверный cloud_name должен был привести к UnableToWriteFile.');
+        } catch (UnableToWriteFile $exception) {
+            $this->assertStringContainsString('CLOUDINARY_CLOUD_NAME', $exception->getMessage());
+        }
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function malformedCloudNames(): array
+    {
+        return [
+            'точка (домен)' => ['my-cloud.com'],
+            'полный url' => ['https://res.cloudinary.com/my-cloud'],
+            'слэш и лишний путь' => ['my-cloud/image'],
+            'ведущий слэш' => ['/my-cloud'],
+            'пробел внутри' => ['my cloud'],
+            'cloudinary url' => ['cloudinary://key:secret@my-cloud'],
+        ];
     }
 
     /**
