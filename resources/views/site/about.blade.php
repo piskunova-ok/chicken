@@ -37,15 +37,15 @@
      */
     $businessImages = [
         'Розничная торговля' => [
-            'image' => 'images/business-retail.png',
+            'image' => 'images/business-retail.webp',
             'alt' => 'Куриная продукция и яйца для розничной торговли',
         ],
         'Общественное питание' => [
-            'image' => 'images/business-foodservice.png',
+            'image' => 'images/business-foodservice.webp',
             'alt' => 'Куриная продукция для кафе и предприятий общественного питания',
         ],
         'Оптовые покупатели' => [
-            'image' => 'images/business-wholesale.png',
+            'image' => 'images/business-wholesale.webp',
             'alt' => 'Оптовая поставка яиц и куриной продукции',
         ],
     ];
@@ -90,7 +90,7 @@
     {{-- ==================== РАССКАЗ О КОМПАНИИ ===================== --}}
     {{--
         Та же асимметрия 50/50, что на главной, но зеркальная: текст слева,
-        фото справа. Фото своё (about-quality.png): оно показывает контроль
+        фото справа. Фото своё (about-quality.webp): оно показывает контроль
         качества продукции и этим отличается от главной, а ниже по странице
         остаётся 04_family_lifestyle в блоке Lifestyle — два одинаковых
         снимка подряд больше не получается. Исходник 1448x1086 (4/3)
@@ -112,7 +112,7 @@
 
             <div class="order-1 lg:order-2">
                 <x-media
-                    src="{{ asset('images/about-quality.png') }}"
+                    src="{{ asset('images/about-quality.webp') }}"
                     alt="Контроль качества яиц и куриной продукции"
                     variant="lifestyle"
                     ratio="4/3"
