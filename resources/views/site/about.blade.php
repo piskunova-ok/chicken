@@ -27,6 +27,28 @@
         ['label' => 'Главная', 'url' => route('home')],
         ['label' => 'О компании', 'url' => null],
     ];
+
+    /*
+     | Фотографии карточек «Продукция для вашего бизнеса». Сопоставление
+     | по названию направления лежит здесь, а не в config/content.php:
+     | конфиг — источник текстов, а изображения принадлежат этой странице.
+     | Все три файла одинакового формата 4/3, поэтому боксы карточек
+     | совпадают, и ряд читается одной строкой.
+     */
+    $businessImages = [
+        'Розничная торговля' => [
+            'image' => 'images/business-retail.png',
+            'alt' => 'Куриная продукция и яйца для розничной торговли',
+        ],
+        'Общественное питание' => [
+            'image' => 'images/business-foodservice.png',
+            'alt' => 'Куриная продукция для кафе и предприятий общественного питания',
+        ],
+        'Оптовые покупатели' => [
+            'image' => 'images/business-wholesale.png',
+            'alt' => 'Оптовая поставка яиц и куриной продукции',
+        ],
+    ];
 @endphp
 
 <x-layouts.app
@@ -68,9 +90,11 @@
     {{-- ==================== РАССКАЗ О КОМПАНИИ ===================== --}}
     {{--
         Та же асимметрия 50/50, что на главной, но зеркальная: текст слева,
-        фото справа. Фото 04_family_lifestyle здесь, а не на главной, — на
-        главной она принадлежит блоку Lifestyle, и в разделе «О компании» ей
-        не место.
+        фото справа. Фото своё (about-quality.png): оно показывает контроль
+        качества продукции и этим отличается от главной, а ниже по странице
+        остаётся 04_family_lifestyle в блоке Lifestyle — два одинаковых
+        снимка подряд больше не получается. Исходник 1448x1086 (4/3)
+        совпадает с боксом, кадр не режется.
     --}}
     <x-section tone="surface" spacing="default">
         <div class="grid gap-10 lg:grid-cols-2 lg:items-center lg:gap-16">
@@ -88,8 +112,8 @@
 
             <div class="order-1 lg:order-2">
                 <x-media
-                    src="{{ asset('images/04_family_lifestyle.jpg') }}"
-                    alt="Семейная трапеза"
+                    src="{{ asset('images/about-quality.png') }}"
+                    alt="Контроль качества яиц и куриной продукции"
                     variant="lifestyle"
                     ratio="4/3"
                 />
@@ -125,6 +149,14 @@
     </x-section>
 
     {{-- ======================== ДЛЯ БИЗНЕСА ========================= --}}
+    {{--
+        Карточки направлены на изображения сверху: файл лежит в локальном
+        массиве $businessImages и подставляется по названию направления.
+        Структура карточки повторяет карточки категорий на /products —
+        скругление даёт overflow-hidden контейнера, бокс одинаковый (4/3)
+        у всех трёх карточек, картинка кадрируется через object-cover.
+        Тексты карточек не меняются.
+    --}}
     <x-section tone="surface" spacing="default">
         <x-section-heading
             :eyebrow="$business['eyebrow'] ?? null"
@@ -136,9 +168,21 @@
 
         <ul class="mt-10 grid gap-6 md:grid-cols-3">
             @foreach ((array) ($business['items'] ?? []) as $item)
-                <li class="flex h-full flex-col rounded-card border border-line bg-canvas p-6 shadow-soft lg:p-7">
-                    <h2 class="text-h3 text-ink">{{ $item['title'] }}</h2>
-                    <p class="mt-3 text-body text-ink-muted">{{ $item['text'] }}</p>
+                @php($businessImage = $businessImages[$item['title']] ?? null)
+                <li class="flex h-full flex-col overflow-hidden rounded-card border border-line bg-canvas shadow-soft">
+                    @if ($businessImage !== null)
+                        <x-media
+                            :src="asset($businessImage['image'])"
+                            :alt="$businessImage['alt']"
+                            variant="card"
+                            ratio="4/3"
+                        />
+                    @endif
+
+                    <div class="flex flex-1 flex-col p-6 lg:p-7">
+                        <h2 class="text-h3 text-ink">{{ $item['title'] }}</h2>
+                        <p class="mt-3 text-body text-ink-muted">{{ $item['text'] }}</p>
+                    </div>
                 </li>
             @endforeach
         </ul>
